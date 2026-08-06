@@ -240,7 +240,7 @@
   "pricing.unpriced": "Без цены",
   "pricing.saved": "Сохранено",
   "pricing.notSet": "Не задано",
-  "export.csvHeaders": "Time,Model,Source,Tier,Result,Time to first token (ns),Generation time (ns),TPS,Reasoning effort,Input,Output,Reasoning,Cache read,Cache creation,Total Tokens,Cache hit,Input USD,Output USD,Cache Read USD,Cache Creation USD,Total USD,Price source,Accounting mode,Price Tier threshold",
+  "export.csvHeaders": "Time,Model,API key alias,API key · last 6,Source,Tier,Result,Time to first token (ns),Generation time (ns),TPS,Reasoning effort,Input,Output,Reasoning,Cache read,Cache creation,Total Tokens,Cache hit,Input USD,Output USD,Cache Read USD,Cache Creation USD,Total USD,Price source,Accounting mode,Price Tier threshold",
   "export.pngTitle": "Аналитика использования токенов",
   "export.pngRange": "Период: {range} · Экспортировано: {time}",
   "export.visibleModels": "Все видимые модели",
@@ -299,5 +299,14 @@
   "backup.restoreWarning": "Это ЗАМЕНИТ все текущие данные (историю использования, цены, настройки) выбранной резервной копией. Отменить это действие нельзя.",
   "backup.restoring": "Восстановление резервной копии…",
   "backup.restored": "Резервная копия восстановлена",
-  "backup.fileTooLarge": "Файл резервной копии слишком большой (максимум 64 МБ)"
+  "backup.fileTooLarge": "Файл резервной копии слишком большой (максимум 64 МБ)",
+  "button.apiKeyManagement": "Фильтр API-ключа",
+  "requestFilter.apiKey": "API-ключ",
+  "requestFilter.allAPIKeys": "Все API-ключи",
+  "apiKey.unnamed": "Без имени · {suffix}",
+  "apiKey.managementPrompt": "Введите ключ управления для фильтрации по псевдониму API-ключа",
+  "apiKey.rawPrompt": "Введите исходный API-ключ один раз (панель его не сохраняет)",
+  "apiKey.aliasPrompt": "Введите отображаемый псевдоним API-ключа",
+  "table.apiKeyAlias": "Псевдоним API-ключа",
+  "table.apiKeySuffix": "API-ключ · последние 6"
 }

@@ -995,3 +995,41 @@ func TestDashboardLocalesCatalog(t *testing.T) {
 		t.Fatalf("dashboardHTML missing init sequence %q", initSeq)
 	}
 }
+
+func TestDashboardAPIKeyDimensionContract(t *testing.T) {
+	for _, required := range []string{
+		`id="apiKeyManagementButton"`,
+		`requestAPIKeyFilter`,
+		`managementAPIKeyAliasesURL=managementBase+'/api-key-aliases'`,
+		`api_key_alias`,
+		`api_key_suffix`,
+		`Authorization`,
+		`apiKey.rawPrompt`,
+		`apiKey.aliasPrompt`,
+		`apiKeyLabel(record)`,
+		`record.api_key_suffix||''`,
+		`function apiKeyLabel(item)`,
+	} {
+		if !strings.Contains(dashboardHTML, required) {
+			t.Fatalf("dashboard missing API key dimension contract %q", required)
+		}
+	}
+	if strings.Contains(dashboardHTML, "originalExportCSV") {
+		t.Fatal("dashboard must not override CSV export with a partial column set")
+	}
+	for _, code := range []string{"en", "zh-CN", "zh-TW", "ru"} {
+		data, err := localeFS.ReadFile("locales/" + code + ".json")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var catalog map[string]string
+		if err := json.Unmarshal(data, &catalog); err != nil {
+			t.Fatalf("locale %s invalid JSON: %v", code, err)
+		}
+		for _, key := range []string{"button.apiKeyManagement", "requestFilter.apiKey", "requestFilter.allAPIKeys", "apiKey.unnamed", "apiKey.managementPrompt", "apiKey.rawPrompt", "apiKey.aliasPrompt", "table.apiKeyAlias", "table.apiKeySuffix"} {
+			if catalog[key] == "" {
+				t.Fatalf("locale %s missing API key key %q", code, key)
+			}
+		}
+	}
+}

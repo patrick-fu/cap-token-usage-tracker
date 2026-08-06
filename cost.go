@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -84,6 +83,7 @@ type costQuerySnapshot struct {
 	HighWater     uint64
 	Generation    uint64
 	Source        string
+	APIKeyID      string
 }
 
 type costCacheKey struct {
@@ -94,6 +94,7 @@ type costCacheKey struct {
 	HighWater     uint64
 	Generation    uint64
 	Source        string
+	APIKeyID      string
 }
 
 type costFlight struct {
@@ -177,13 +178,17 @@ func (s *Store) queryCosts(queryRange usageRange) (CostResponse, error) {
 }
 
 func (s *Store) queryCostsBySource(queryRange usageRange, source string) (CostResponse, error) {
+	return s.queryCostsBySourceAndAPIKeyAlias(queryRange, source, "")
+}
+
+func (s *Store) queryCostsBySourceAndAPIKeyAlias(queryRange usageRange, source, apiKeyAlias string) (CostResponse, error) {
 	s.stateMu.RLock()
 	defer s.stateMu.RUnlock()
 	if s.closed {
 		return CostResponse{}, errors.New("store is closed")
 	}
 	resp := make(chan costSnapshotResult, 1)
-	s.commands <- costSnapshotCommand{queryRange: queryRange, source: source, resp: resp}
+	s.commands <- costSnapshotCommand{queryRange: queryRange, source: source, apiKeyAlias: apiKeyAlias, resp: resp}
 	result := <-resp
 	if result.err != nil {
 		return CostResponse{}, result.err
@@ -197,6 +202,7 @@ func (s *Store) queryCostsBySource(queryRange usageRange, source string) (CostRe
 		HighWater:     snapshot.HighWater,
 		Generation:    snapshot.Generation,
 		Source:        snapshot.Source,
+		APIKeyID:      snapshot.APIKeyID,
 	}
 
 	s.costMu.Lock()
@@ -287,7 +293,7 @@ func (s *Store) scanCosts(snapshot costQuerySnapshot) (CostResponse, error) {
 				break
 			}
 			var request RequestDetail
-			if err := json.Unmarshal(value, &request); err != nil {
+			if err := unmarshalStoredRequest(value, &request); err != nil {
 				return fmt.Errorf("decode request detail: %w", err)
 			}
 			if request.Sequence > snapshot.HighWater {
@@ -295,6 +301,9 @@ func (s *Store) scanCosts(snapshot costQuerySnapshot) (CostResponse, error) {
 			}
 			request.Dimensions = sanitizeDimensionsSource(request.Dimensions)
 			if snapshot.Source != "" && request.Source != snapshot.Source {
+				continue
+			}
+			if snapshot.APIKeyID != "" && request.APIKeyID != snapshot.APIKeyID {
 				continue
 			}
 			request.EstimatedCost = nil

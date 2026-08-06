@@ -23,6 +23,7 @@ type RequestDetail struct {
 	GenerationNS  uint64         `json:"generation_ns"`
 	TPS           float64        `json:"tps"`
 	CacheHit      bool           `json:"cache_hit"`
+	APIKeyAlias   string         `json:"api_key_alias,omitempty"`
 	EstimatedCost *EstimatedCost `json:"estimated_cost,omitempty"`
 }
 

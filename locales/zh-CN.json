@@ -240,7 +240,7 @@
   "pricing.unpriced": "未定价",
   "pricing.saved": "已保存",
   "pricing.notSet": "未设置",
-  "export.csvHeaders": "时间,模型名称,来源,Tier,结果,首字延迟(ns),生成时间(ns),TPS,思考强度,输入,输出,思考,缓存读取,缓存创建,总Token数,缓存命中,Input USD,Output USD,Cache Read USD,Cache Creation USD,Total USD,价格来源,计费模式,价格Tier阈值",
+  "export.csvHeaders": "时间,模型名称,API Key 别名,API Key · 末 6 位,来源,Tier,结果,首字延迟(ns),生成时间(ns),TPS,思考强度,输入,输出,思考,缓存读取,缓存创建,总Token数,缓存命中,Input USD,Output USD,Cache Read USD,Cache Creation USD,Total USD,价格来源,计费模式,价格Tier阈值",
   "export.pngTitle": "Token 用量统计",
   "export.pngRange": "范围：{range} · 导出：{time}",
   "export.visibleModels": "全部可见模型",
@@ -299,5 +299,14 @@
   "backup.restoreWarning": "这将用所选备份替换当前全部数据（使用历史、价格、偏好设置）。此操作无法撤销。",
   "backup.restoring": "正在恢复备份…",
   "backup.restored": "备份恢复成功",
-  "backup.fileTooLarge": "备份文件过大（最大 64 MB）"
+  "backup.fileTooLarge": "备份文件过大（最大 64 MB）",
+  "button.apiKeyManagement": "API Key 筛选",
+  "requestFilter.apiKey": "API Key",
+  "requestFilter.allAPIKeys": "全部 API Key",
+  "apiKey.unnamed": "未命名 · {suffix}",
+  "apiKey.managementPrompt": "输入 Management Key 以按 API Key 别名筛选",
+  "apiKey.rawPrompt": "输入一次原始 API Key（Dashboard 不会保存）",
+  "apiKey.aliasPrompt": "输入此 API Key 的显示别名",
+  "table.apiKeyAlias": "API Key 别名",
+  "table.apiKeySuffix": "API Key · 末 6 位"
 }

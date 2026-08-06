@@ -19,6 +19,8 @@ type Dimensions struct {
 	ReasoningEffort string `json:"reasoning_effort"`
 	Failed          bool   `json:"failed"`
 	FailureStatus   int    `json:"failure_status"`
+	APIKeyID        string `json:"-"`
+	APIKeySuffix    string `json:"api_key_suffix,omitempty"`
 }
 
 type Counters struct {
@@ -97,6 +99,7 @@ type GroupStats struct {
 	Counters
 	AverageLatencyNS uint64 `json:"average_latency_ns"`
 	AverageTTFTNS    uint64 `json:"average_ttft_ns"`
+	APIKeyAlias      string `json:"api_key_alias,omitempty"`
 }
 
 type SeriesPoint struct {
@@ -141,6 +144,10 @@ func buildStats(data map[aggregateKey]Counters, since, lastUsed time.Time, reque
 }
 
 func buildStatsForRange(data map[aggregateKey]Counters, since, lastUsed time.Time, queryRange usageRange, source string, now time.Time) StatsResponse {
+	return buildStatsForRangeWithFilters(data, since, lastUsed, queryRange, source, "", nil, now)
+}
+
+func buildStatsForRangeWithFilters(data map[aggregateKey]Counters, since, lastUsed time.Time, queryRange usageRange, source, apiKeyID string, aliases map[string]APIKeyAliasRecord, now time.Time) StatsResponse {
 	groups := make(map[Dimensions]Counters)
 	series := make(map[int64]Counters)
 	modelSeries := make(map[struct {
@@ -149,6 +156,7 @@ func buildStatsForRange(data map[aggregateKey]Counters, since, lastUsed time.Tim
 	}]Counters)
 	summary := Counters{}
 	sources := make(map[string]struct{})
+	filteredLastUsed := time.Time{}
 	for key, counters := range data {
 		bucketTime := time.Unix(key.Hour, 0).UTC()
 		if !queryRange.Start.IsZero() && bucketTime.Before(queryRange.Start) {
@@ -163,6 +171,12 @@ func buildStatsForRange(data map[aggregateKey]Counters, since, lastUsed time.Tim
 		}
 		if source != "" && dimensions.Source != source {
 			continue
+		}
+		if apiKeyID != "" && dimensions.APIKeyID != apiKeyID {
+			continue
+		}
+		if (source != "" || apiKeyID != "") && bucketTime.After(filteredLastUsed) {
+			filteredLastUsed = bucketTime
 		}
 		group := groups[dimensions]
 		group.add(counters)
@@ -194,6 +208,7 @@ func buildStatsForRange(data map[aggregateKey]Counters, since, lastUsed time.Tim
 			Counters:         counters,
 			AverageLatencyNS: counters.averageLatencyNS(),
 			AverageTTFTNS:    counters.averageTTFTNS(),
+			APIKeyAlias:      applyAPIKeyAlias(&dimensions, aliases),
 		})
 	}
 	sort.Slice(groupRows, func(i, j int) bool {
@@ -243,6 +258,9 @@ func buildStatsForRange(data map[aggregateKey]Counters, since, lastUsed time.Tim
 	}
 	sort.Strings(sourceValues)
 
+	if source != "" || apiKeyID != "" {
+		lastUsed = filteredLastUsed
+	}
 	return StatsResponse{
 		SchemaVersion: 1,
 		GeneratedAt:   now.UTC(),
@@ -324,6 +342,8 @@ func compareDimensions(left, right Dimensions) int {
 		cmp.Compare(left.AuthType, right.AuthType),
 		cmp.Compare(left.ServiceTier, right.ServiceTier),
 		cmp.Compare(left.ReasoningEffort, right.ReasoningEffort),
+		cmp.Compare(left.APIKeyID, right.APIKeyID),
+		cmp.Compare(left.APIKeySuffix, right.APIKeySuffix),
 		cmp.Compare(boolInt(left.Failed), boolInt(right.Failed)),
 		cmp.Compare(left.FailureStatus, right.FailureStatus),
 	} {

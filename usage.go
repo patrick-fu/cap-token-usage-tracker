@@ -57,6 +57,7 @@ func decodeUsage(raw []byte, now time.Time) (normalizedUsage, error) {
 	provider := normalizeDimension(firstString(root, "Provider", "provider"))
 	executorType := normalizeDimension(firstString(root, "ExecutorType", "executor_type"))
 	authType := normalizeDimension(firstString(root, "AuthType", "auth_type"))
+	apiKeyID, apiKeySuffix := apiKeyIdentity(firstString(root, "APIKey", "api_key"))
 	return normalizedUsage{
 		Dimensions: Dimensions{
 			Provider:        provider,
@@ -69,6 +70,8 @@ func decodeUsage(raw []byte, now time.Time) (normalizedUsage, error) {
 			ReasoningEffort: normalizeDimension(firstString(root, "ReasoningEffort", "reasoning_effort")),
 			Failed:          failed,
 			FailureStatus:   clampStatus(firstInt64(failure, "StatusCode", "status_code")),
+			APIKeyID:        apiKeyID,
+			APIKeySuffix:    apiKeySuffix,
 		},
 		RequestedAt: requestedAt,
 		LatencyNS:   positiveDurationNS(root, "Latency", "latency", "latency_ns"),

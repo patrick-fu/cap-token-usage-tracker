@@ -28,9 +28,10 @@ var (
 	modelPriceSettingsKey   = []byte("model_price_sync_settings")
 	modelPriceLastSyncKey   = []byte("model_price_last_sync")
 	dashboardPreferencesKey = []byte("dashboard_preferences")
+	apiKeyAliasesKey        = []byte("api_key_aliases")
 )
 
-const persistenceSchemaVersion uint64 = 5
+const persistenceSchemaVersion uint64 = 6
 
 type recordCommand struct {
 	usage normalizedUsage
@@ -38,9 +39,10 @@ type recordCommand struct {
 }
 
 type queryCommand struct {
-	queryRange usageRange
-	source     string
-	resp       chan queryResult
+	queryRange  usageRange
+	source      string
+	apiKeyAlias string
+	resp        chan queryResult
 }
 
 type queryResult struct {
@@ -49,13 +51,14 @@ type queryResult struct {
 }
 
 type requestQueryCommand struct {
-	queryRange usageRange
-	offset     int
-	limit      int
-	model      string
-	source     string
-	result     string
-	resp       chan requestQueryResult
+	queryRange  usageRange
+	offset      int
+	limit       int
+	model       string
+	source      string
+	result      string
+	apiKeyAlias string
+	resp        chan requestQueryResult
 }
 
 type requestQueryResult struct {
@@ -89,9 +92,10 @@ type observedModelsResult struct {
 	err    error
 }
 type costSnapshotCommand struct {
-	queryRange usageRange
-	source     string
-	resp       chan costSnapshotResult
+	queryRange  usageRange
+	source      string
+	apiKeyAlias string
+	resp        chan costSnapshotResult
 }
 type costSnapshotResult struct {
 	snapshot costQuerySnapshot
@@ -105,6 +109,28 @@ type savePreferencesCommand struct {
 type preferencesResult struct {
 	preferences DashboardPreferences
 	err         error
+}
+type apiKeyAliasesCommand struct{ resp chan apiKeyAliasesResult }
+type setAPIKeyAliasCommand struct {
+	rawKey string
+	alias  string
+	resp   chan apiKeyAliasResult
+}
+type deleteAPIKeyAliasCommand struct {
+	rawKey string
+	resp   chan error
+}
+type resolveAPIKeyAliasCommand struct {
+	alias string
+	resp  chan apiKeyAliasResult
+}
+type apiKeyAliasesResult struct {
+	aliases []APIKeyAlias
+	err     error
+}
+type apiKeyAliasResult struct {
+	alias APIKeyAlias
+	err   error
 }
 
 type resetCommand struct{ resp chan error }
@@ -179,6 +205,7 @@ type storeActor struct {
 	lastPriceSync        *PriceSyncMetadata
 	costGeneration       uint64
 	dashboardPreferences DashboardPreferences
+	apiKeyAliases        map[string]APIKeyAliasRecord
 }
 
 func openStore(config Config) (*Store, error) {
@@ -240,8 +267,12 @@ func (s *Store) queryStats(queryRange usageRange) (StatsResponse, error) {
 }
 
 func (s *Store) queryStatsBySource(queryRange usageRange, source string) (StatsResponse, error) {
+	return s.queryStatsBySourceAndAPIKeyAlias(queryRange, source, "")
+}
+
+func (s *Store) queryStatsBySourceAndAPIKeyAlias(queryRange usageRange, source, apiKeyAlias string) (StatsResponse, error) {
 	resp := make(chan queryResult, 1)
-	if err := s.send(queryCommand{queryRange: queryRange, source: source, resp: resp}); err != nil {
+	if err := s.send(queryCommand{queryRange: queryRange, source: source, apiKeyAlias: apiKeyAlias, resp: resp}); err != nil {
 		return StatsResponse{}, err
 	}
 	result := <-resp
@@ -261,12 +292,55 @@ func (s *Store) queryRequestPage(queryRange usageRange, offset, limit int, model
 }
 
 func (s *Store) queryRequestPageBySource(queryRange usageRange, offset, limit int, model, source, resultFilter string) (RequestPage, error) {
+	return s.queryRequestPageByFilters(queryRange, offset, limit, model, source, resultFilter, "")
+}
+
+func (s *Store) queryRequestPageByFilters(queryRange usageRange, offset, limit int, model, source, resultFilter, apiKeyAlias string) (RequestPage, error) {
 	resp := make(chan requestQueryResult, 1)
-	if err := s.send(requestQueryCommand{queryRange: queryRange, offset: offset, limit: limit, model: model, source: source, result: resultFilter, resp: resp}); err != nil {
+	if err := s.send(requestQueryCommand{queryRange: queryRange, offset: offset, limit: limit, model: model, source: source, result: resultFilter, apiKeyAlias: apiKeyAlias, resp: resp}); err != nil {
 		return RequestPage{}, err
 	}
 	result := <-resp
 	return result.page, result.err
+}
+
+// QueryAPIKeyAliases returns configured aliases without exposing fingerprints.
+func (s *Store) QueryAPIKeyAliases() ([]APIKeyAlias, error) {
+	resp := make(chan apiKeyAliasesResult, 1)
+	if err := s.send(apiKeyAliasesCommand{resp: resp}); err != nil {
+		return nil, err
+	}
+	result := <-resp
+	return result.aliases, result.err
+}
+
+// SetAPIKeyAlias assigns alias to a raw downstream key without persisting the key.
+func (s *Store) SetAPIKeyAlias(rawKey, alias string) (APIKeyAlias, error) {
+	resp := make(chan apiKeyAliasResult, 1)
+	if err := s.send(setAPIKeyAliasCommand{rawKey: rawKey, alias: alias, resp: resp}); err != nil {
+		return APIKeyAlias{}, err
+	}
+	result := <-resp
+	return result.alias, result.err
+}
+
+// DeleteAPIKeyAlias removes the alias associated with a raw downstream key.
+func (s *Store) DeleteAPIKeyAlias(rawKey string) error {
+	resp := make(chan error, 1)
+	if err := s.send(deleteAPIKeyAliasCommand{rawKey: rawKey, resp: resp}); err != nil {
+		return err
+	}
+	return <-resp
+}
+
+// ResolveAPIKeyAlias returns one configured alias, matched case-insensitively.
+func (s *Store) ResolveAPIKeyAlias(alias string) (APIKeyAlias, error) {
+	resp := make(chan apiKeyAliasResult, 1)
+	if err := s.send(resolveAPIKeyAliasCommand{alias: alias, resp: resp}); err != nil {
+		return APIKeyAlias{}, err
+	}
+	result := <-resp
+	return result.alias, result.err
 }
 
 func (s *Store) QueryDashboardPreferences() (DashboardPreferences, error) {
@@ -464,7 +538,12 @@ func (s *Store) run(actor *storeActor) {
 					item.resp <- queryResult{err: withStatus(400, "%v", err)}
 					continue
 				}
-				stats := buildStatsForRange(actor.data, actor.since, actor.lastUsed, item.queryRange, item.source, time.Now().UTC())
+				apiKeyID, err := actor.resolveAPIKeyAliasID(item.apiKeyAlias)
+				if err != nil {
+					item.resp <- queryResult{err: err}
+					continue
+				}
+				stats := buildStatsForRangeWithFilters(actor.data, actor.since, actor.lastUsed, item.queryRange, item.source, apiKeyID, actor.apiKeyAliases, time.Now().UTC())
 				item.resp <- queryResult{stats: stats}
 			case requestQueryCommand:
 				now := time.Now().UTC()
@@ -473,13 +552,23 @@ func (s *Store) run(actor *storeActor) {
 					item.resp <- requestQueryResult{err: err}
 					continue
 				}
-				page, err := actor.queryRequests(item.queryRange, item.offset, item.limit, item.model, item.source, item.result, now)
+				page, err := actor.queryRequests(item.queryRange, item.offset, item.limit, item.model, item.source, item.result, item.apiKeyAlias, now)
 				item.resp <- requestQueryResult{page: page, err: err}
 			case preferencesQueryCommand:
 				item.resp <- preferencesResult{preferences: cloneDashboardPreferences(actor.dashboardPreferences)}
 			case savePreferencesCommand:
 				preferences, err := actor.saveDashboardPreferences(item.preferences)
 				item.resp <- preferencesResult{preferences: preferences, err: err}
+			case apiKeyAliasesCommand:
+				item.resp <- apiKeyAliasesResult{aliases: actor.apiKeyAliasViews()}
+			case setAPIKeyAliasCommand:
+				alias, err := actor.setAPIKeyAlias(item.rawKey, item.alias)
+				item.resp <- apiKeyAliasResult{alias: alias, err: err}
+			case deleteAPIKeyAliasCommand:
+				item.resp <- actor.deleteAPIKeyAlias(item.rawKey)
+			case resolveAPIKeyAliasCommand:
+				alias, err := actor.resolveAPIKeyAlias(item.alias)
+				item.resp <- apiKeyAliasResult{alias: alias, err: err}
 			case priceQueryCommand:
 				item.resp <- priceQueryResult{response: actor.priceBookResponse()}
 			case savePricesCommand:
@@ -502,7 +591,10 @@ func (s *Store) run(actor *storeActor) {
 					item.resp <- costSnapshotResult{err: err}
 					continue
 				}
-				err := item.queryRange.validate()
+				apiKeyID, err := actor.resolveAPIKeyAliasID(item.apiKeyAlias)
+				if err == nil {
+					err = item.queryRange.validate()
+				}
 				item.resp <- costSnapshotResult{snapshot: costQuerySnapshot{
 					Range:         item.queryRange.Name,
 					Start:         item.queryRange.Start,
@@ -514,6 +606,7 @@ func (s *Store) run(actor *storeActor) {
 					HighWater:     actor.nextRequestSeq,
 					Generation:    actor.costGeneration,
 					Source:        item.source,
+					APIKeyID:      apiKeyID,
 				}, err: err}
 			case resetCommand:
 				if err := actor.retryFailedFlush(time.Now().UTC()); err != nil {
@@ -633,6 +726,7 @@ func (a *storeActor) reload() error {
 	a.priceSyncSettings = defaultPriceSyncSettings()
 	a.lastPriceSync = nil
 	a.dashboardPreferences = defaultDashboardPreferences()
+	a.apiKeyAliases = make(map[string]APIKeyAliasRecord)
 
 	return a.db.View(func(tx *bolt.Tx) error {
 		meta := tx.Bucket(metaBucket)
@@ -664,6 +758,16 @@ func (a *storeActor) reload() error {
 				return fmt.Errorf("validate dashboard preferences: %w", err)
 			}
 			a.dashboardPreferences = normalized
+		}
+		if raw := meta.Get(apiKeyAliasesKey); len(raw) > 0 {
+			var stored map[string]APIKeyAliasRecord
+			if err := json.Unmarshal(raw, &stored); err != nil {
+				return fmt.Errorf("decode API key aliases: %w", err)
+			}
+			if err := validateAPIKeyAliasRecords(stored); err != nil {
+				return fmt.Errorf("validate API key aliases: %w", err)
+			}
+			a.apiKeyAliases = cloneAPIKeyAliases(stored)
 		}
 		a.priceRevision = decodeUint64(meta.Get(modelPriceRevisionKey))
 		if a.priceRevision == 0 && len(a.modelPrices) > 0 {
@@ -701,7 +805,7 @@ func (a *storeActor) reload() error {
 			hour := decodeInt64(hourKey)
 			return hourBucket.ForEach(func(dimensionKey, counterValue []byte) error {
 				var dimensions Dimensions
-				if err := json.Unmarshal(dimensionKey, &dimensions); err != nil {
+				if err := unmarshalStoredDimensions(dimensionKey, &dimensions); err != nil {
 					return fmt.Errorf("decode dimensions: %w", err)
 				}
 				var counters Counters
@@ -776,7 +880,7 @@ func validateRestoreDatabase(path string) error {
 			return errors.New("database buckets are missing")
 		}
 		version := decodeUint64(meta.Get(schemaKey))
-		if version != persistenceSchemaVersion {
+		if version > persistenceSchemaVersion {
 			return fmt.Errorf("unsupported restore schema version %d", version)
 		}
 		if raw := meta.Get(sinceKey); len(raw) != 0 && len(raw) != 8 {
@@ -824,6 +928,15 @@ func validateRestoreDatabase(path string) error {
 				return fmt.Errorf("validate dashboard preferences: %w", err)
 			}
 		}
+		if raw := meta.Get(apiKeyAliasesKey); len(raw) > 0 {
+			var stored map[string]APIKeyAliasRecord
+			if err := json.Unmarshal(raw, &stored); err != nil {
+				return fmt.Errorf("decode API key aliases: %w", err)
+			}
+			if err := validateAPIKeyAliasRecords(stored); err != nil {
+				return fmt.Errorf("validate API key aliases: %w", err)
+			}
+		}
 		return requests.ForEach(func(key, value []byte) error {
 			if len(key) != 16 {
 				return fmt.Errorf("invalid request key length %d", len(key))
@@ -832,11 +945,52 @@ func validateRestoreDatabase(path string) error {
 				return errors.New("request bucket contains nested bucket")
 			}
 			var detail RequestDetail
-			if err := json.Unmarshal(value, &detail); err != nil {
+			if err := unmarshalStoredRequest(value, &detail); err != nil {
 				return fmt.Errorf("decode request detail: %w", err)
 			}
 			return nil
 		})
+	})
+}
+
+// migrateRestoreDatabase upgrades a validated staged backup before it replaces
+// the live database. Keeping migration on the staged file makes failures
+// recoverable: the live database is untouched until the upgrade succeeds.
+func migrateRestoreDatabase(path string) error {
+	db, err := bolt.Open(path, 0o600, &bolt.Options{Timeout: storeOpenProbeTimeout})
+	if err != nil {
+		return fmt.Errorf("open staged restore database for migration: %w", err)
+	}
+	defer db.Close()
+	return db.Update(func(tx *bolt.Tx) error {
+		meta, err := tx.CreateBucketIfNotExists(metaBucket)
+		if err != nil {
+			return err
+		}
+		hours, err := tx.CreateBucketIfNotExists(hoursBucket)
+		if err != nil {
+			return err
+		}
+		requests, err := tx.CreateBucketIfNotExists(requestsBucket)
+		if err != nil {
+			return err
+		}
+		version := decodeUint64(meta.Get(schemaKey))
+		if version > persistenceSchemaVersion {
+			return fmt.Errorf("unsupported restore schema version %d", version)
+		}
+		if err := migratePriceMetadata(meta, version); err != nil {
+			return err
+		}
+		if err := migrateUsageSources(hours, requests, version); err != nil {
+			return err
+		}
+		if len(meta.Get(sinceKey)) != 8 {
+			if err := meta.Put(sinceKey, encodeInt64(time.Now().UTC().UnixNano())); err != nil {
+				return err
+			}
+		}
+		return meta.Put(schemaKey, encodeUint64(persistenceSchemaVersion))
 	})
 }
 
@@ -889,6 +1043,12 @@ func (a *storeActor) restoreBackup(backup []byte) (*bolt.DB, error) {
 	}
 	if err := validateRestoreDatabase(stagedPath); err != nil {
 		return a.db, withStatus(400, "invalid backup database: %v", err)
+	}
+	if err := migrateRestoreDatabase(stagedPath); err != nil {
+		return a.db, withStatus(400, "migrate backup database: %v", err)
+	}
+	if err := validateRestoreDatabase(stagedPath); err != nil {
+		return a.db, withStatus(400, "invalid migrated backup database: %v", err)
 	}
 
 	livePath := a.config.DataPath
@@ -1000,7 +1160,7 @@ func migrateUsageSources(hours, requests *bolt.Bucket, version uint64) error {
 					return nil
 				}
 				var dimensions Dimensions
-				if err := json.Unmarshal(key, &dimensions); err != nil {
+				if err := unmarshalStoredDimensions(key, &dimensions); err != nil {
 					return fmt.Errorf("decode dimensions for source migration: %w", err)
 				}
 				var counters Counters
@@ -1051,7 +1211,7 @@ func migrateUsageSources(hours, requests *bolt.Bucket, version uint64) error {
 				return nil
 			}
 			var request RequestDetail
-			if err := json.Unmarshal(value, &request); err != nil {
+			if err := unmarshalStoredRequest(value, &request); err != nil {
 				return fmt.Errorf("decode request for source migration: %w", err)
 			}
 			sanitized := sanitizeDimensionsSource(request.Dimensions)
@@ -1059,7 +1219,7 @@ func migrateUsageSources(hours, requests *bolt.Bucket, version uint64) error {
 				return nil
 			}
 			request.Dimensions = sanitized
-			encoded, err := json.Marshal(request)
+			encoded, err := marshalStoredRequest(request)
 			if err != nil {
 				return err
 			}
@@ -1199,7 +1359,7 @@ func (a *storeActor) flush(now time.Time, force bool) error {
 			if err != nil {
 				return err
 			}
-			dimensions, err := json.Marshal(key.Dimensions)
+			dimensions, err := marshalStoredDimensions(key.Dimensions)
 			if err != nil {
 				return err
 			}
@@ -1212,7 +1372,7 @@ func (a *storeActor) flush(now time.Time, force bool) error {
 			}
 		}
 		for _, request := range a.pendingRequests {
-			encoded, err := json.Marshal(request)
+			encoded, err := marshalStoredRequest(request)
 			if err != nil {
 				return err
 			}
@@ -1488,7 +1648,7 @@ func (a *storeActor) reset() error {
 	return nil
 }
 
-func (a *storeActor) queryRequests(queryRange usageRange, offset, limit int, model, source, resultFilter string, now time.Time) (RequestPage, error) {
+func (a *storeActor) queryRequests(queryRange usageRange, offset, limit int, model, source, resultFilter, apiKeyAlias string, now time.Time) (RequestPage, error) {
 	if err := queryRange.validate(); err != nil {
 		return RequestPage{}, withStatus(400, "%v", err)
 	}
@@ -1504,6 +1664,10 @@ func (a *storeActor) queryRequests(queryRange usageRange, offset, limit int, mod
 	if resultFilter != "" && resultFilter != "success" && resultFilter != "failed" {
 		return RequestPage{}, withStatus(400, "result must be success or failed")
 	}
+	apiKeyID, err := a.resolveAPIKeyAliasID(apiKeyAlias)
+	if err != nil {
+		return RequestPage{}, err
+	}
 
 	resolver := newModelPriceResolver(a.modelPrices, a.priceSyncSettings)
 	page := RequestPage{
@@ -1514,7 +1678,7 @@ func (a *storeActor) queryRequests(queryRange usageRange, offset, limit int, mod
 		Limit:             limit,
 		Items:             make([]RequestDetail, 0, limit),
 	}
-	err := a.db.View(func(tx *bolt.Tx) error {
+	err = a.db.View(func(tx *bolt.Tx) error {
 		requests := tx.Bucket(requestsBucket)
 		if requests == nil {
 			return errors.New("requests bucket is missing")
@@ -1532,7 +1696,7 @@ func (a *storeActor) queryRequests(queryRange usageRange, offset, limit int, mod
 				break
 			}
 			var item RequestDetail
-			if err := json.Unmarshal(value, &item); err != nil {
+			if err := unmarshalStoredRequest(value, &item); err != nil {
 				return fmt.Errorf("decode request detail: %w", err)
 			}
 			item.Dimensions = sanitizeDimensionsSource(item.Dimensions)
@@ -1546,6 +1710,9 @@ func (a *storeActor) queryRequests(queryRange usageRange, offset, limit int, mod
 			if source != "" && item.Source != source {
 				continue
 			}
+			if apiKeyID != "" && item.APIKeyID != apiKeyID {
+				continue
+			}
 			if (resultFilter == "success" && item.Failed) || (resultFilter == "failed" && !item.Failed) {
 				continue
 			}
@@ -1555,6 +1722,7 @@ func (a *storeActor) queryRequests(queryRange usageRange, offset, limit int, mod
 			}
 			cost := estimateRequestCostWithResolver(item, resolver)
 			item.EstimatedCost = &cost
+			item.APIKeyAlias = applyAPIKeyAlias(&item.Dimensions, a.apiKeyAliases)
 			page.Items = append(page.Items, item)
 		}
 		return nil
@@ -1563,6 +1731,98 @@ func (a *storeActor) queryRequests(queryRange usageRange, offset, limit int, mod
 		return RequestPage{}, fmt.Errorf("query request details: %w", err)
 	}
 	return page, nil
+}
+
+func (a *storeActor) apiKeyAliasViews() []APIKeyAlias {
+	views := make([]APIKeyAlias, 0, len(a.apiKeyAliases))
+	for _, record := range a.apiKeyAliases {
+		views = append(views, record.public())
+	}
+	sort.Slice(views, func(i, j int) bool {
+		return strings.ToLower(views[i].Alias) < strings.ToLower(views[j].Alias)
+	})
+	return views
+}
+
+func (a *storeActor) resolveAPIKeyAlias(alias string) (APIKeyAlias, error) {
+	record, ok := findAPIKeyAlias(a.apiKeyAliases, alias)
+	if !ok {
+		return APIKeyAlias{}, withStatus(404, "API key alias %q was not found", normalizeAPIKeyAlias(alias))
+	}
+	return record.public(), nil
+}
+
+func (a *storeActor) resolveAPIKeyAliasID(alias string) (string, error) {
+	if normalizeAPIKeyAlias(alias) == "" {
+		return "", nil
+	}
+	record, ok := findAPIKeyAlias(a.apiKeyAliases, alias)
+	if !ok {
+		return "", withStatus(400, "API key alias %q was not found", normalizeAPIKeyAlias(alias))
+	}
+	return record.APIKeyID, nil
+}
+
+func (a *storeActor) setAPIKeyAlias(rawKey, alias string) (APIKeyAlias, error) {
+	id, suffix := apiKeyIdentity(rawKey)
+	alias = normalizeAPIKeyAlias(alias)
+	if id == "" {
+		return APIKeyAlias{}, withStatus(400, "API key is required")
+	}
+	if alias == "" {
+		return APIKeyAlias{}, withStatus(400, "API key alias is required")
+	}
+	if existing, ok := findAPIKeyAlias(a.apiKeyAliases, alias); ok && existing.APIKeyID != id {
+		return APIKeyAlias{}, withStatus(400, "API key alias %q is already in use", alias)
+	}
+	record := APIKeyAliasRecord{APIKeyID: id, APIKeySuffix: suffix, Alias: alias, UpdatedAt: time.Now().UTC()}
+	next := cloneAPIKeyAliases(a.apiKeyAliases)
+	next[id] = record
+	if err := a.persistAPIKeyAliases(next); err != nil {
+		return APIKeyAlias{}, err
+	}
+	a.apiKeyAliases = next
+	return record.public(), nil
+}
+
+func (a *storeActor) deleteAPIKeyAlias(rawKey string) error {
+	id, _ := apiKeyIdentity(rawKey)
+	if id == "" {
+		return withStatus(400, "API key is required")
+	}
+	if _, exists := a.apiKeyAliases[id]; !exists {
+		return nil
+	}
+	next := cloneAPIKeyAliases(a.apiKeyAliases)
+	delete(next, id)
+	if err := a.persistAPIKeyAliases(next); err != nil {
+		return err
+	}
+	a.apiKeyAliases = next
+	return nil
+}
+
+func (a *storeActor) persistAPIKeyAliases(aliases map[string]APIKeyAliasRecord) error {
+	if err := validateAPIKeyAliasRecords(aliases); err != nil {
+		return withStatus(400, "%v", err)
+	}
+	encoded, err := json.Marshal(aliases)
+	if err != nil {
+		return fmt.Errorf("encode API key aliases: %w", err)
+	}
+	if err := a.db.Update(func(tx *bolt.Tx) error {
+		meta := tx.Bucket(metaBucket)
+		if meta == nil {
+			return errors.New("metadata bucket is missing")
+		}
+		if len(aliases) == 0 {
+			return meta.Delete(apiKeyAliasesKey)
+		}
+		return meta.Put(apiKeyAliasesKey, encoded)
+	}); err != nil {
+		return fmt.Errorf("persist API key aliases: %w", err)
+	}
+	return nil
 }
 
 func retentionCutoff(config Config, now time.Time) int64 {

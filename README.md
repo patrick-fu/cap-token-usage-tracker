@@ -27,15 +27,25 @@ CLIProxyAPI 的持久化 Token 用量统计插件。插件通过官方 `usage_pl
 
 ## 隐私
 
+插件从不保存 raw API key。当上游用量记录包含下游 API key 时，插件只保留：
+
+- 对去除首尾空白后的 key 计算得到的 SHA-256 fingerprint
+- key 的末 6 位
+- 通过 management API 配置的可选显示别名
+
+raw key 不会被持久化，统计、逐请求、费用和别名接口也不会返回 raw key 或 fingerprint；对外只暴露末 6 位后缀和别名，长度不超过 6 的短 key 不暴露后缀。在 API key 维度引入之前记录的历史数据（或上游负载中不含 API key 的记录）没有 key 维度，无法被别名筛选命中，也不会显示后缀或别名。
+
+别名全局唯一、大小写不敏感，并在查询时动态解析：重命名或删除别名会立即作用于全部历史视图，无需重写用量记录。
+
 插件不会保存或通过统计接口返回：
 
-- API Key
+- 原始 API Key
 - Auth ID / Auth Index
 - 失败响应正文
 - 响应头
 - 请求或响应正文
 
-数据库包含分钟级聚合维度与计数、逐请求用量元数据（例如时间、模型、来源、Tier、结果、延迟、推理强度、Token 计数和缓存命中），以及用户设置或从 models.dev 同步的模型价格、Context Tier、匹配设置和同步来源元数据；不会保存 prompt、响应内容或其他请求/响应正文。维度字段和逐请求元数据仍可能反映模型、来源或服务层级等运行信息。为使仪表盘打开时无需再次输入密钥，插件的只读资源接口不经过 CLIProxyAPI management 鉴权；请只在受信网络中暴露 CLIProxyAPI。受保护的 management 统计、模型价格保存、models.dev 同步和重置接口仍需管理鉴权。
+数据库包含分钟级聚合维度与计数、逐请求用量元数据（例如时间、模型、来源、Tier、结果、延迟、推理强度、Token 计数和缓存命中）、API key 的 fingerprint 与末 6 位、可选别名，以及用户设置或从 models.dev 同步的模型价格、Context Tier、匹配设置和同步来源元数据；不会保存 prompt、响应内容或其他请求/响应正文。维度字段和逐请求元数据仍可能反映模型、来源、服务层级或 key 后缀等运行信息。整库备份同样包含 fingerprint 与别名，备份/恢复接口需要 management 鉴权。为使仪表盘打开时无需再次输入密钥，插件的只读资源接口不经过 CLIProxyAPI management 鉴权，保持匿名并拒绝携带 `api_key_alias` 的请求（HTTP 403）；别名管理和按别名筛选都需要 management API。请只在受信网络中暴露 CLIProxyAPI。受保护的 management 统计、别名管理、模型价格保存、models.dev 同步、备份/恢复和重置接口仍需管理鉴权。
 
 ## 配置
 
@@ -96,11 +106,17 @@ plugins:
 - 最新 USD/CNY 显示汇率（无需 management key）：`GET /v0/resource/plugins/cap-token-usage-tracker/exchange-rate`
 - 模型价格、同步设置和最近同步结果读取（无需 management key）：`GET /v0/resource/plugins/cap-token-usage-tracker/prices`
 - 受保护统计：`GET /v0/management/plugins/cap-token-usage-tracker/stats?range=custom&start=2026-08-19T16:00:00Z&end=2026-08-21T16:00:00Z`
+- 受保护逐请求明细（需要 management key，支持 `api_key_alias`）：`GET /v0/management/plugins/cap-token-usage-tracker/requests?range=custom&start=2026-08-19T16:00:00Z&end=2026-08-21T16:00:00Z&offset=0&limit=100&model=gpt-4.1&source=cli&result=success&api_key_alias=Personal`
+- 受保护逐请求精确汇总费用（需要 management key，支持 `api_key_alias`）：`GET /v0/management/plugins/cap-token-usage-tracker/costs?range=custom&start=2026-08-19T16:00:00Z&end=2026-08-21T16:00:00Z&api_key_alias=Personal`
+- 列出 API key 别名（需要 management key）：`GET /v0/management/plugins/cap-token-usage-tracker/api-key-aliases`
+- 设置或重命名 API key 别名（需要 management key）：`PUT /v0/management/plugins/cap-token-usage-tracker/api-key-aliases`，请求体 `{"api_key":"sk-...","alias":"Personal"}`
+- 删除 API key 别名（需要 management key）：`DELETE /v0/management/plugins/cap-token-usage-tracker/api-key-aliases`，请求体 `{"api_key":"sk-..."}`
+- 只读 API key 别名列表（无需 management key）：`GET /v0/resource/plugins/cap-token-usage-tracker/api-key-aliases`
 - 模型价格完整替换保存（需要 management key）：`PUT /v0/management/plugins/cap-token-usage-tracker/prices`
 - 从 models.dev 同步价格（需要 management key）：`POST /v0/management/plugins/cap-token-usage-tracker/prices/sync`
 - 受保护重置：`POST /v0/management/plugins/cap-token-usage-tracker/reset`
 
-仪表盘以浏览器所在地的自然日选择日期范围，并将本地起始日零点与结束日次日零点转换为 RFC3339 `start`、`end` 时间点；后端按左闭右开区间 `[start, end)` 过滤。两个参数必须同时提供且 `start < end`。旧的 `range=24h`、`7d`、`30d`、`retention` 继续用于接口兼容。`source` 可选，按请求明细中的来源字段精确筛选，并可用于 `/stats`、`/requests` 和 `/costs`；逐请求明细按时间倒序返回，`offset` 必须为非负整数，`limit` 默认为 100、最大为 500，`model` 可选并用于精确筛选模型，`result` 可选值为 `success` 或 `failed`。
+仪表盘以浏览器所在地的自然日选择日期范围，并将本地起始日零点与结束日次日零点转换为 RFC3339 `start`、`end` 时间点；后端按左闭右开区间 `[start, end)` 过滤。两个参数必须同时提供且 `start < end`。旧的 `range=24h`、`7d`、`30d`、`retention` 继续用于接口兼容。`source` 可选，按请求明细中的来源字段精确筛选，并可用于 `/stats`、`/requests` 和 `/costs`；逐请求明细按时间倒序返回，`offset` 必须为非负整数，`limit` 默认为 100、最大为 500，`model` 可选并用于精确筛选模型，`result` 可选值为 `success` 或 `failed`。`api_key_alias` 可选，按别名大小写不敏感解析到 key 的 fingerprint 后精确筛选，仅受保护的 management `/stats`、`/requests` 和 `/costs` 接受；resource 版本一旦携带该参数即返回 HTTP 403。两个别名接口都返回 `{"aliases":[{"api_key_suffix":"...","alias":"...","updated_at":"..."}]}`，不包含 raw key 或 fingerprint。`PUT /api-key-aliases` 的请求体提供 raw key，插件只在内存中计算 fingerprint 并保存 fingerprint、末 6 位和别名，raw key 不会被持久化；别名已被其他 key 使用时返回 HTTP 400。`DELETE` 按请求体中的 raw key 删除对应别名。
 
 Management Center 会把插件页面放入 iframe。仪表盘通过只读资源接口自动加载，打开和刷新页面都不需要 management key。通过反向代理部署在子路径时，仪表盘会从当前 iframe 地址自动保留公网路径前缀；例如 iframe 位于 `/cpa/v0/resource/plugins/cap-token-usage-tracker/dashboard` 时，资源、管理和模型目录请求会分别使用 `/cpa/v0/resource/plugins/...`、`/cpa/v0/management/plugins/...` 和 `/cpa/v1/models`。价格弹窗使用临时 CLIProxyAPI API Key 从同源 `/v1/models`（含反向代理前缀）加载当前模型目录；保存价格、同步 models.dev 或重置数据时仍要求 Management Key。两种密钥都只保存在当前 DOM/内存中，关闭对话框后清空，不会写入插件数据库、浏览器存储或 URL。模型价格、同步设置和同步来源元数据保存在插件 bbolt 数据库中，刷新页面和重启服务后仍会保留；重置统计不会删除价格簿。
 
@@ -289,15 +305,25 @@ A persistent Token usage tracking plugin for CLIProxyAPI. The plugin receives us
 
 ### Privacy
 
+The plugin never stores raw API keys. When an upstream usage record contains the downstream API key, the plugin keeps only:
+
+- a SHA-256 fingerprint of the trimmed key
+- the last six characters of the key
+- an optional display alias configured through the management API
+
+The raw key is never persisted, and neither the raw key nor its fingerprint is ever returned by statistics, request, cost, or alias endpoints; only the last-six suffix and the alias are exposed, and keys of six characters or fewer have no public suffix. Records captured before the API-key dimension existed (or without an API key in the upstream payload) have no key dimension, cannot be matched by alias filtering, and show no suffix or alias.
+
+Aliases are unique, case-insensitive, and resolved at query time: renaming or deleting an alias retroactively updates all historical views without rewriting usage records.
+
 The plugin does not store or return via statistics endpoints:
 
-- API Key
+- Raw API Key
 - Auth ID / Auth Index
 - Failure response body
 - Response headers
 - Request or response body
 
-The database contains minute-level aggregation dimensions and counts, per-request usage metadata such as time, model, source, tier, result, latency, reasoning intensity, Token counters, and cache-hit status, plus manually configured or models.dev-synchronized prices, context tiers, matching settings, and synchronization provenance. It does not store prompts, generated content, or other request/response bodies. Dimensions and request metadata may still reflect operational information such as model, source, or service tier. To let the dashboard open without asking for the key again, the read-only resource endpoints do not use CLIProxyAPI management authentication; expose CLIProxyAPI only on a trusted network. Protected management statistics, model-price saves, models.dev synchronization, and reset still require management authentication.
+The database contains minute-level aggregation dimensions and counts, per-request usage metadata such as time, model, source, tier, result, latency, reasoning intensity, Token counters, and cache-hit status, plus API-key fingerprints, suffixes, and optional aliases, and manually configured or models.dev-synchronized prices, context tiers, matching settings, and synchronization provenance. It does not store prompts, generated content, or other request/response bodies. Dimensions and request metadata may still reflect operational information such as model, source, service tier, or key suffix. Full database backups likewise contain fingerprints and aliases; the backup/restore endpoints require management authentication. To let the dashboard open without asking for the key again, the read-only resource endpoints do not use CLIProxyAPI management authentication; they remain anonymous and reject any request carrying the `api_key_alias` parameter with HTTP 403, while alias management and alias-based filtering require the management API. Expose CLIProxyAPI only on a trusted network. Protected management statistics, alias management, model-price saves, models.dev synchronization, backup/restore, and reset still require management authentication.
 
 ### Configuration
 
@@ -358,11 +384,17 @@ The plugin ID is derived from the shared library filename. Using `cap-token-usag
 - Latest USD/CNY display exchange rate (no management key): `GET /v0/resource/plugins/cap-token-usage-tracker/exchange-rate`
 - Model prices, synchronization settings, and last synchronization result (no management key): `GET /v0/resource/plugins/cap-token-usage-tracker/prices`
 - Protected statistics: `GET /v0/management/plugins/cap-token-usage-tracker/stats?range=custom&start=2026-08-19T16:00:00Z&end=2026-08-21T16:00:00Z`
+- Protected per-request details (management key required; supports `api_key_alias`): `GET /v0/management/plugins/cap-token-usage-tracker/requests?range=custom&start=2026-08-19T16:00:00Z&end=2026-08-21T16:00:00Z&offset=0&limit=100&model=gpt-4.1&source=cli&result=success&api_key_alias=Personal`
+- Protected exact per-request-derived cost summary (management key required; supports `api_key_alias`): `GET /v0/management/plugins/cap-token-usage-tracker/costs?range=custom&start=2026-08-19T16:00:00Z&end=2026-08-21T16:00:00Z&api_key_alias=Personal`
+- List configured API key aliases (management key required): `GET /v0/management/plugins/cap-token-usage-tracker/api-key-aliases`
+- Assign or rename an API key alias (management key required): `PUT /v0/management/plugins/cap-token-usage-tracker/api-key-aliases` with body `{"api_key":"sk-...","alias":"Personal"}`
+- Remove an API key alias (management key required): `DELETE /v0/management/plugins/cap-token-usage-tracker/api-key-aliases` with body `{"api_key":"sk-..."}`
+- Read-only API key alias list (no management key): `GET /v0/resource/plugins/cap-token-usage-tracker/api-key-aliases`
 - Full-replacement model-price save (management key required): `PUT /v0/management/plugins/cap-token-usage-tracker/prices`
 - Synchronize prices from models.dev (management key required): `POST /v0/management/plugins/cap-token-usage-tracker/prices/sync`
 - Protected reset: `POST /v0/management/plugins/cap-token-usage-tracker/reset`
 
-The dashboard selects calendar days in the browser's local time zone, then converts local midnight at the start and midnight after the end date to RFC3339 `start` and `end` instants. The backend filters the half-open interval `[start, end)`; both parameters are required and `start` must be earlier than `end`. The legacy `range=24h`, `7d`, `30d`, and `retention` values remain supported for API compatibility. Optional `source` applies an exact filter against the same source field shown in request details and is accepted by `/stats`, `/requests`, and `/costs`. Request details are returned newest first; `offset` must be a non-negative integer, `limit` defaults to 100 and is capped at 500, and optional `model` applies an exact model filter.
+The dashboard selects calendar days in the browser's local time zone, then converts local midnight at the start and midnight after the end date to RFC3339 `start` and `end` instants. The backend filters the half-open interval `[start, end)`; both parameters are required and `start` must be earlier than `end`. The legacy `range=24h`, `7d`, `30d`, and `retention` values remain supported for API compatibility. Optional `source` applies an exact filter against the same source field shown in request details and is accepted by `/stats`, `/requests`, and `/costs`. Request details are returned newest first; `offset` must be a non-negative integer, `limit` defaults to 100 and is capped at 500, and optional `model` applies an exact model filter. Optional `api_key_alias` resolves the alias case-insensitively to the key fingerprint and applies an exact filter; it is accepted only by the protected management `/stats`, `/requests`, and `/costs` endpoints, while the resource variants reject the parameter with HTTP 403. Both alias endpoints return `{"aliases":[{"api_key_suffix":"...","alias":"...","updated_at":"..."}]}` and never include the raw key or its fingerprint. `PUT /api-key-aliases` accepts the raw key in the request body, computes the fingerprint in memory, and persists only the fingerprint, suffix, and alias; assigning an alias already used by another key returns HTTP 400. `DELETE` removes the alias for the raw key supplied in the body.
 
 The Management Center embeds the plugin page in an iframe. The dashboard loads automatically through the read-only resource endpoints, so opening and refreshing it does not require a management key. When CLIProxyAPI is exposed below a reverse-proxy subpath, the dashboard preserves the public prefix from its iframe URL. For example, an iframe at `/cpa/v0/resource/plugins/cap-token-usage-tracker/dashboard` uses `/cpa/v0/resource/plugins/...`, `/cpa/v0/management/plugins/...`, and `/cpa/v1/models` for resource, management, and model-catalog requests. The pricing dialog uses a temporary CLIProxyAPI API Key to load the current model directory from same-origin `/v1/models` with that prefix; a Management Key is still required to save prices, synchronize models.dev, or reset data. Both keys exist only in the current DOM/memory, are cleared when the dialog closes, and are never written to the plugin database, browser storage, or URL. Prices, synchronization settings, and provenance are stored in bbolt, survive page refreshes and service restarts, and are not removed by statistics reset.
 

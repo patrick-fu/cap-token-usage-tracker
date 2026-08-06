@@ -240,7 +240,7 @@
   "pricing.unpriced": "未定價",
   "pricing.saved": "已保存",
   "pricing.notSet": "未設置",
-  "export.csvHeaders": "時間,模型名稱,來源,Tier,結果,首字延遲(ns),生成時間(ns),TPS,思考強度,輸入,輸出,思考,快取讀取,快取創建,總Token數,快取命中,Input USD,Output USD,Cache Read USD,Cache Creation USD,Total USD,價格來源,計費模式,價格Tier閾值",
+  "export.csvHeaders": "時間,模型名稱,API Key 別名,API Key · 末 6 位,來源,Tier,結果,首字延遲(ns),生成時間(ns),TPS,思考強度,輸入,輸出,思考,快取讀取,快取創建,總Token數,快取命中,Input USD,Output USD,Cache Read USD,Cache Creation USD,Total USD,價格來源,計費模式,價格Tier閾值",
   "export.pngTitle": "Token 用量統計",
   "export.pngRange": "範圍：{range} · 導出：{time}",
   "export.visibleModels": "全部可見模型",
@@ -299,5 +299,14 @@
   "backup.restoreWarning": "這將以所選備份取代目前全部資料（使用歷程、價格、偏好設定）。此操作無法復原。",
   "backup.restoring": "正在還原備份…",
   "backup.restored": "備份還原成功",
-  "backup.fileTooLarge": "備份檔案過大（最大 64 MB）"
+  "backup.fileTooLarge": "備份檔案過大（最大 64 MB）",
+  "button.apiKeyManagement": "API Key 篩選",
+  "requestFilter.apiKey": "API Key",
+  "requestFilter.allAPIKeys": "全部 API Key",
+  "apiKey.unnamed": "未命名 · {suffix}",
+  "apiKey.managementPrompt": "輸入 Management Key 以按 API Key 別名篩選",
+  "apiKey.rawPrompt": "輸入一次原始 API Key（Dashboard 不會保存）",
+  "apiKey.aliasPrompt": "輸入此 API Key 的顯示別名",
+  "table.apiKeyAlias": "API Key 別名",
+  "table.apiKeySuffix": "API Key · 末 6 位"
 }

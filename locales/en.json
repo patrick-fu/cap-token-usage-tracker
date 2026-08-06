@@ -240,7 +240,7 @@
   "pricing.unpriced": "Unpriced",
   "pricing.saved": "Saved",
   "pricing.notSet": "Not set",
-  "export.csvHeaders": "Time,Model,Source,Tier,Result,Time to first token (ns),Generation time (ns),TPS,Reasoning effort,Input,Output,Reasoning,Cache read,Cache creation,Total Tokens,Cache hit,Input USD,Output USD,Cache Read USD,Cache Creation USD,Total USD,Price source,Accounting mode,Price Tier threshold",
+  "export.csvHeaders": "Time,Model,API key alias,API key · last 6,Source,Tier,Result,Time to first token (ns),Generation time (ns),TPS,Reasoning effort,Input,Output,Reasoning,Cache read,Cache creation,Total Tokens,Cache hit,Input USD,Output USD,Cache Read USD,Cache Creation USD,Total USD,Price source,Accounting mode,Price Tier threshold",
   "export.pngTitle": "Token Usage Analytics",
   "export.pngRange": "Range: {range} · Exported: {time}",
   "export.visibleModels": "All visible models",
@@ -299,5 +299,14 @@
   "backup.restoreWarning": "This will REPLACE all current data (usage history, prices, preferences) with the selected backup. This cannot be undone.",
   "backup.restoring": "Restoring backup…",
   "backup.restored": "Backup restored successfully",
-  "backup.fileTooLarge": "Backup file is too large (maximum 64 MB)"
+  "backup.fileTooLarge": "Backup file is too large (maximum 64 MB)",
+  "button.apiKeyManagement": "API key filter",
+  "requestFilter.apiKey": "API key",
+  "requestFilter.allAPIKeys": "All API keys",
+  "apiKey.unnamed": "Unnamed · {suffix}",
+  "apiKey.managementPrompt": "Enter the management key to filter by API key alias",
+  "apiKey.rawPrompt": "Enter the raw API key once (not stored by dashboard)",
+  "apiKey.aliasPrompt": "Enter a display alias for this API key",
+  "table.apiKeyAlias": "API key alias",
+  "table.apiKeySuffix": "API key · last 6"
 }

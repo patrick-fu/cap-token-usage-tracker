@@ -965,7 +965,7 @@ func TestStoreBackupAndRestore(t *testing.T) {
 	}
 }
 
-func TestValidateRestoreDatabaseRejectsWrongSchema(t *testing.T) {
+func TestValidateRestoreDatabaseRejectsFutureSchema(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "bad-schema.db")
 	db, err := bolt.Open(path, 0o600, nil)
 	if err != nil {
@@ -982,7 +982,7 @@ func TestValidateRestoreDatabaseRejectsWrongSchema(t *testing.T) {
 		if _, err := tx.CreateBucket(requestsBucket); err != nil {
 			return err
 		}
-		return meta.Put(schemaKey, encodeUint64(4))
+		return meta.Put(schemaKey, encodeUint64(persistenceSchemaVersion+1))
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -991,6 +991,95 @@ func TestValidateRestoreDatabaseRejectsWrongSchema(t *testing.T) {
 	}
 	if err := validateRestoreDatabase(path); err == nil {
 		t.Fatal("expected schema mismatch")
+	}
+}
+
+func TestRestoreBackupMigratesOlderSchema(t *testing.T) {
+	config := testConfig(t)
+	store, err := openStore(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	oldPath := filepath.Join(t.TempDir(), "schema-five.db")
+	requestedAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Minute)
+	dimensions := Dimensions{Provider: "openai", Model: "legacy", Source: "cli"}
+	counters := Counters{Requests: 1, InputTokens: 2, OutputTokens: 3, TotalTokens: 5}
+	dimensionKey, err := json.Marshal(dimensions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requestValue, err := json.Marshal(RequestDetail{Sequence: 1, Time: requestedAt, Dimensions: dimensions, Counters: counters, Result: "成功"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := bolt.Open(oldPath, 0o600, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Update(func(tx *bolt.Tx) error {
+		meta, err := tx.CreateBucket(metaBucket)
+		if err != nil {
+			return err
+		}
+		if err := meta.Put(schemaKey, encodeUint64(5)); err != nil {
+			return err
+		}
+		if err := meta.Put(sinceKey, encodeInt64(requestedAt.Add(-time.Hour).UnixNano())); err != nil {
+			return err
+		}
+		if err := meta.Put(requestSequenceKey, encodeUint64(1)); err != nil {
+			return err
+		}
+		hours, err := tx.CreateBucket(hoursBucket)
+		if err != nil {
+			return err
+		}
+		hour, err := hours.CreateBucket(encodeInt64(requestedAt.Unix()))
+		if err != nil {
+			return err
+		}
+		encodedCounters, err := json.Marshal(counters)
+		if err != nil {
+			return err
+		}
+		if err := hour.Put(dimensionKey, encodedCounters); err != nil {
+			return err
+		}
+		requests, err := tx.CreateBucket(requestsBucket)
+		if err != nil {
+			return err
+		}
+		return requests.Put(encodeRequestKey(requestedAt.UnixNano(), 1), requestValue)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	backup, err := os.ReadFile(oldPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RestoreBackup(backup); err != nil {
+		t.Fatalf("restore schema-five backup: %v", err)
+	}
+	stats, err := store.Query("retention")
+	if err != nil || stats.Summary.TotalTokens != 5 {
+		t.Fatalf("restored legacy stats = %+v, %v", stats, err)
+	}
+	page, err := store.QueryRequests("retention", 0, 100, "")
+	if err != nil || page.Total != 1 || len(page.Items) != 1 || page.Items[0].Model != "legacy" {
+		t.Fatalf("restored legacy requests = %+v, %v", page, err)
+	}
+	if err := store.db.View(func(tx *bolt.Tx) error {
+		if got := decodeUint64(tx.Bucket(metaBucket).Get(schemaKey)); got != persistenceSchemaVersion {
+			return fmt.Errorf("restored schema version = %d", got)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 }
 
