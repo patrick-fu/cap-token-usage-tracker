@@ -999,14 +999,29 @@ func TestDashboardLocalesCatalog(t *testing.T) {
 func TestDashboardAPIKeyDimensionContract(t *testing.T) {
 	for _, required := range []string{
 		`requestAPIKeyAliases=[]`,
-		`select.multiple=true`,
-		`select.size=3`,
+		`requestAPIKeyFilterButton`,
+		`requestAPIKeyFilterMenu`,
+		`requestAPIKeyFilterAll`,
+		`clearAPIKeyFilter`,
 		`requestAPIKeyFilterLabel`,
-		`apiKey.multiSelectHint`,
-		`renderAPIKeyFilter();if(currentData)`,
-		`id="apiKeyFilterDialog"`,
-		`function apiKeyAliasQuery(params)`,
+		`type='checkbox'`,
+		`checkbox.dataset.alias=item.alias`,
+		`checkbox.checked=requestAPIKeyAliases.indexOf(item.alias)>=0`,
+		`requestAPIKeyFilterAll.checked=requestAPIKeyAliases.length===0`,
+		`requestAPIKeyFilterAll.addEventListener('change'`,
+		`clearAPIKeyFilter.addEventListener('click'`,
+		`button.setAttribute('aria-controls','requestAPIKeyFilterMenu')`,
+		`menu.setAttribute('aria-labelledby','requestAPIKeyFilterLabel')`,
+		`aria-expanded`,
+		`function closeAPIKeyFilterMenu(`,
+		`dashboardLoadSequence`,
+		`if(sequence!==dashboardLoadSequence)return;`,
+		`if(sequence===dashboardLoadSequence)button.disabled=false;`,
+		`error.status=response.status`,
+		`apiKeyManagementKey=''`,
 		`params.append('api_key_alias',alias)`,
+		`renderAPIKeyFilter();if(currentData)`,
+		`function apiKeyAliasQuery(params)`,
 		`managementStatsURL=managementBase+'/stats'`,
 		`apiKeyAliasesURL=resourceBase+'/api-key-aliases'`,
 		`api_key_suffix`,
@@ -1017,6 +1032,11 @@ func TestDashboardAPIKeyDimensionContract(t *testing.T) {
 	} {
 		if !strings.Contains(dashboardHTML, required) {
 			t.Fatalf("dashboard missing API key dimension contract %q", required)
+		}
+	}
+	for _, forbidden := range []string{`select.multiple=true`, `select.size=3`} {
+		if strings.Contains(dashboardHTML, forbidden) {
+			t.Fatalf("dashboard must not depend on native multi-select sizing %q", forbidden)
 		}
 	}
 	if strings.Contains(dashboardHTML, "originalExportCSV") {
@@ -1042,7 +1062,7 @@ func TestDashboardAPIKeyDimensionContract(t *testing.T) {
 		if err := json.Unmarshal(data, &catalog); err != nil {
 			t.Fatalf("locale %s invalid JSON: %v", code, err)
 		}
-		for _, key := range []string{"requestFilter.apiKey", "requestFilter.apiKeyMulti", "requestFilter.clearAPIKeys", "apiKey.unnamed", "apiKey.filterTitle", "apiKey.filterDescription", "apiKey.filterConfirm", "apiKey.multiSelectHint", "apiKey.multiSelectAria", "table.apiKeyAlias", "table.apiKeySuffix"} {
+		for _, key := range []string{"requestFilter.apiKey", "requestFilter.apiKeyMulti", "requestFilter.allAPIKeys", "requestFilter.clearAPIKeys", "apiKey.unnamed", "apiKey.filterTitle", "apiKey.filterDescription", "apiKey.filterConfirm", "apiKey.filterMenu", "apiKey.filterSelected", "apiKey.multiSelectHint", "apiKey.multiSelectAria", "table.apiKeyAlias", "table.apiKeySuffix"} {
 			if catalog[key] == "" {
 				t.Fatalf("locale %s missing API key key %q", code, key)
 			}

@@ -302,13 +302,16 @@
   "backup.fileTooLarge": "Файл резервной копии слишком большой (максимум 64 МБ)",
   "requestFilter.apiKey": "API-ключ",
   "requestFilter.apiKeyMulti": "Псевдонимы API-ключей",
+  "requestFilter.allAPIKeys": "Все API-ключи",
   "requestFilter.clearAPIKeys": "Очистить",
   "apiKey.unnamed": "Без имени · {suffix}",
   "apiKey.filterTitle": "Фильтр по псевдониму API-ключа",
   "apiKey.filterDescription": "На время действия фильтра требуется ключ управления. Он хранится только в памяти.",
   "apiKey.filterConfirm": "Применить фильтр",
-  "apiKey.multiSelectHint": "Удерживайте Ctrl или Command, чтобы выбрать несколько псевдонимов.",
-  "apiKey.multiSelectAria": "Выберите один или несколько псевдонимов API-ключей",
+  "apiKey.filterMenu": "Фильтр псевдонимов API-ключей",
+  "apiKey.filterSelected": "Выбрано: {count}",
+  "apiKey.multiSelectHint": "Отметьте один или несколько псевдонимов. Выберите «Все API-ключи», чтобы очистить фильтр.",
+  "apiKey.multiSelectAria": "Фильтр псевдонимов API-ключей",
   "table.apiKeyAlias": "Псевдоним API-ключа",
   "table.apiKeySuffix": "API-ключ · последние 6"
 }

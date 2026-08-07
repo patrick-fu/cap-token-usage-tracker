@@ -302,13 +302,16 @@
   "backup.fileTooLarge": "Backup file is too large (maximum 64 MB)",
   "requestFilter.apiKey": "API key",
   "requestFilter.apiKeyMulti": "API key aliases",
+  "requestFilter.allAPIKeys": "All API keys",
   "requestFilter.clearAPIKeys": "Clear",
   "apiKey.unnamed": "Unnamed · {suffix}",
   "apiKey.filterTitle": "Filter by API key alias",
   "apiKey.filterDescription": "A management key is required while this filter is active. It is kept only in memory.",
   "apiKey.filterConfirm": "Apply filter",
-  "apiKey.multiSelectHint": "Hold Ctrl or Command while selecting multiple aliases.",
-  "apiKey.multiSelectAria": "Select one or more API key aliases",
+  "apiKey.filterMenu": "Filter API key aliases",
+  "apiKey.filterSelected": "{count} selected",
+  "apiKey.multiSelectHint": "Check one or more aliases. Select All API keys to clear the filter.",
+  "apiKey.multiSelectAria": "Filter API key aliases",
   "table.apiKeyAlias": "API key alias",
   "table.apiKeySuffix": "API key · last 6"
 }

@@ -302,13 +302,16 @@
   "backup.fileTooLarge": "備份檔案過大（最大 64 MB）",
   "requestFilter.apiKey": "API Key",
   "requestFilter.apiKeyMulti": "API Key 別名（可多選）",
+  "requestFilter.allAPIKeys": "所有 API Key",
   "requestFilter.clearAPIKeys": "清除",
   "apiKey.unnamed": "未命名 · {suffix}",
   "apiKey.filterTitle": "依 API Key 別名篩選",
   "apiKey.filterDescription": "篩選啟用期間需要 Management Key，僅保存在記憶體中。",
   "apiKey.filterConfirm": "套用篩選",
-  "apiKey.multiSelectHint": "按住 Ctrl 或 Command 點擊可選擇多個別名。",
-  "apiKey.multiSelectAria": "選擇一個或多個 API Key 別名",
+  "apiKey.filterMenu": "篩選 API Key 別名",
+  "apiKey.filterSelected": "已選 {count} 個",
+  "apiKey.multiSelectHint": "勾選一個或多個別名；選擇「所有 API Key」可清除篩選。",
+  "apiKey.multiSelectAria": "篩選 API Key 別名",
   "table.apiKeyAlias": "API Key 別名",
   "table.apiKeySuffix": "API Key · 末 6 位"
 }
