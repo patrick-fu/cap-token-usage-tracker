@@ -202,6 +202,7 @@ func pluginRegistration() registration {
 				{Name: "flush_interval", Type: pluginapi.ConfigFieldTypeString, Description: "Maximum delay before batched statistics are flushed, for example 5s."},
 				{Name: "flush_max_records", Type: pluginapi.ConfigFieldTypeInteger, Description: "Flush after this many accepted usage records."},
 				{Name: "sync_on_record", Type: pluginapi.ConfigFieldTypeBoolean, Description: "Commit every usage record before acknowledging it."},
+				{Name: "api_key_aliases", Type: pluginapi.ConfigFieldTypeArray, Description: "List of {api_key, alias} entries mapping downstream API keys to display aliases. Raw keys are fingerprinted in-memory and never persisted to the database."},
 			},
 		},
 		Capabilities: registrationCapabilities{UsagePlugin: true, ManagementAPI: true},

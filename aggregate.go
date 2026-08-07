@@ -144,10 +144,10 @@ func buildStats(data map[aggregateKey]Counters, since, lastUsed time.Time, reque
 }
 
 func buildStatsForRange(data map[aggregateKey]Counters, since, lastUsed time.Time, queryRange usageRange, source string, now time.Time) StatsResponse {
-	return buildStatsForRangeWithFilters(data, since, lastUsed, queryRange, source, "", nil, now)
+	return buildStatsForRangeWithFilters(data, since, lastUsed, queryRange, source, nil, nil, now)
 }
 
-func buildStatsForRangeWithFilters(data map[aggregateKey]Counters, since, lastUsed time.Time, queryRange usageRange, source, apiKeyID string, aliases map[string]APIKeyAliasRecord, now time.Time) StatsResponse {
+func buildStatsForRangeWithFilters(data map[aggregateKey]Counters, since, lastUsed time.Time, queryRange usageRange, source string, apiKeyIDs map[string]struct{}, aliases map[string]APIKeyAliasRecord, now time.Time) StatsResponse {
 	groups := make(map[Dimensions]Counters)
 	series := make(map[int64]Counters)
 	modelSeries := make(map[struct {
@@ -172,10 +172,12 @@ func buildStatsForRangeWithFilters(data map[aggregateKey]Counters, since, lastUs
 		if source != "" && dimensions.Source != source {
 			continue
 		}
-		if apiKeyID != "" && dimensions.APIKeyID != apiKeyID {
-			continue
+		if len(apiKeyIDs) > 0 {
+			if _, ok := apiKeyIDs[dimensions.APIKeyID]; !ok {
+				continue
+			}
 		}
-		if (source != "" || apiKeyID != "") && bucketTime.After(filteredLastUsed) {
+		if (source != "" || len(apiKeyIDs) > 0) && bucketTime.After(filteredLastUsed) {
 			filteredLastUsed = bucketTime
 		}
 		group := groups[dimensions]
@@ -258,7 +260,7 @@ func buildStatsForRangeWithFilters(data map[aggregateKey]Counters, since, lastUs
 	}
 	sort.Strings(sourceValues)
 
-	if source != "" || apiKeyID != "" {
+	if source != "" || len(apiKeyIDs) > 0 {
 		lastUsed = filteredLastUsed
 	}
 	return StatsResponse{

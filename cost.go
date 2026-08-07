@@ -83,7 +83,7 @@ type costQuerySnapshot struct {
 	HighWater     uint64
 	Generation    uint64
 	Source        string
-	APIKeyID      string
+	APIKeyIDs     map[string]struct{}
 }
 
 type costCacheKey struct {
@@ -94,7 +94,7 @@ type costCacheKey struct {
 	HighWater     uint64
 	Generation    uint64
 	Source        string
-	APIKeyID      string
+	APIKeyIDs     string
 }
 
 type costFlight struct {
@@ -178,17 +178,17 @@ func (s *Store) queryCosts(queryRange usageRange) (CostResponse, error) {
 }
 
 func (s *Store) queryCostsBySource(queryRange usageRange, source string) (CostResponse, error) {
-	return s.queryCostsBySourceAndAPIKeyAlias(queryRange, source, "")
+	return s.queryCostsBySourceAndAPIKeyAlias(queryRange, source, nil)
 }
 
-func (s *Store) queryCostsBySourceAndAPIKeyAlias(queryRange usageRange, source, apiKeyAlias string) (CostResponse, error) {
+func (s *Store) queryCostsBySourceAndAPIKeyAlias(queryRange usageRange, source string, apiKeyAliases []string) (CostResponse, error) {
 	s.stateMu.RLock()
 	defer s.stateMu.RUnlock()
 	if s.closed {
 		return CostResponse{}, errors.New("store is closed")
 	}
 	resp := make(chan costSnapshotResult, 1)
-	s.commands <- costSnapshotCommand{queryRange: queryRange, source: source, apiKeyAlias: apiKeyAlias, resp: resp}
+	s.commands <- costSnapshotCommand{queryRange: queryRange, source: source, apiKeyAliases: apiKeyAliases, resp: resp}
 	result := <-resp
 	if result.err != nil {
 		return CostResponse{}, result.err
@@ -202,7 +202,7 @@ func (s *Store) queryCostsBySourceAndAPIKeyAlias(queryRange usageRange, source, 
 		HighWater:     snapshot.HighWater,
 		Generation:    snapshot.Generation,
 		Source:        snapshot.Source,
-		APIKeyID:      snapshot.APIKeyID,
+		APIKeyIDs:     apiKeyIDSetKey(snapshot.APIKeyIDs),
 	}
 
 	s.costMu.Lock()
@@ -303,8 +303,10 @@ func (s *Store) scanCosts(snapshot costQuerySnapshot) (CostResponse, error) {
 			if snapshot.Source != "" && request.Source != snapshot.Source {
 				continue
 			}
-			if snapshot.APIKeyID != "" && request.APIKeyID != snapshot.APIKeyID {
-				continue
+			if len(snapshot.APIKeyIDs) > 0 {
+				if _, ok := snapshot.APIKeyIDs[request.APIKeyID]; !ok {
+					continue
+				}
 			}
 			request.EstimatedCost = nil
 			cost := estimateRequestCostWithResolver(request, resolver)

@@ -39,10 +39,10 @@ type recordCommand struct {
 }
 
 type queryCommand struct {
-	queryRange  usageRange
-	source      string
-	apiKeyAlias string
-	resp        chan queryResult
+	queryRange    usageRange
+	source        string
+	apiKeyAliases []string
+	resp          chan queryResult
 }
 
 type queryResult struct {
@@ -51,14 +51,14 @@ type queryResult struct {
 }
 
 type requestQueryCommand struct {
-	queryRange  usageRange
-	offset      int
-	limit       int
-	model       string
-	source      string
-	result      string
-	apiKeyAlias string
-	resp        chan requestQueryResult
+	queryRange    usageRange
+	offset        int
+	limit         int
+	model         string
+	source        string
+	result        string
+	apiKeyAliases []string
+	resp          chan requestQueryResult
 }
 
 type requestQueryResult struct {
@@ -92,10 +92,10 @@ type observedModelsResult struct {
 	err    error
 }
 type costSnapshotCommand struct {
-	queryRange  usageRange
-	source      string
-	apiKeyAlias string
-	resp        chan costSnapshotResult
+	queryRange    usageRange
+	source        string
+	apiKeyAliases []string
+	resp          chan costSnapshotResult
 }
 type costSnapshotResult struct {
 	snapshot costQuerySnapshot
@@ -111,26 +111,9 @@ type preferencesResult struct {
 	err         error
 }
 type apiKeyAliasesCommand struct{ resp chan apiKeyAliasesResult }
-type setAPIKeyAliasCommand struct {
-	rawKey string
-	alias  string
-	resp   chan apiKeyAliasResult
-}
-type deleteAPIKeyAliasCommand struct {
-	rawKey string
-	resp   chan error
-}
-type resolveAPIKeyAliasCommand struct {
-	alias string
-	resp  chan apiKeyAliasResult
-}
 type apiKeyAliasesResult struct {
 	aliases []APIKeyAlias
 	err     error
-}
-type apiKeyAliasResult struct {
-	alias APIKeyAlias
-	err   error
 }
 
 type resetCommand struct{ resp chan error }
@@ -267,12 +250,12 @@ func (s *Store) queryStats(queryRange usageRange) (StatsResponse, error) {
 }
 
 func (s *Store) queryStatsBySource(queryRange usageRange, source string) (StatsResponse, error) {
-	return s.queryStatsBySourceAndAPIKeyAlias(queryRange, source, "")
+	return s.queryStatsBySourceAndAPIKeyAlias(queryRange, source, nil)
 }
 
-func (s *Store) queryStatsBySourceAndAPIKeyAlias(queryRange usageRange, source, apiKeyAlias string) (StatsResponse, error) {
+func (s *Store) queryStatsBySourceAndAPIKeyAlias(queryRange usageRange, source string, apiKeyAliases []string) (StatsResponse, error) {
 	resp := make(chan queryResult, 1)
-	if err := s.send(queryCommand{queryRange: queryRange, source: source, apiKeyAlias: apiKeyAlias, resp: resp}); err != nil {
+	if err := s.send(queryCommand{queryRange: queryRange, source: source, apiKeyAliases: apiKeyAliases, resp: resp}); err != nil {
 		return StatsResponse{}, err
 	}
 	result := <-resp
@@ -292,12 +275,12 @@ func (s *Store) queryRequestPage(queryRange usageRange, offset, limit int, model
 }
 
 func (s *Store) queryRequestPageBySource(queryRange usageRange, offset, limit int, model, source, resultFilter string) (RequestPage, error) {
-	return s.queryRequestPageByFilters(queryRange, offset, limit, model, source, resultFilter, "")
+	return s.queryRequestPageByFilters(queryRange, offset, limit, model, source, resultFilter, nil)
 }
 
-func (s *Store) queryRequestPageByFilters(queryRange usageRange, offset, limit int, model, source, resultFilter, apiKeyAlias string) (RequestPage, error) {
+func (s *Store) queryRequestPageByFilters(queryRange usageRange, offset, limit int, model, source, resultFilter string, apiKeyAliases []string) (RequestPage, error) {
 	resp := make(chan requestQueryResult, 1)
-	if err := s.send(requestQueryCommand{queryRange: queryRange, offset: offset, limit: limit, model: model, source: source, result: resultFilter, apiKeyAlias: apiKeyAlias, resp: resp}); err != nil {
+	if err := s.send(requestQueryCommand{queryRange: queryRange, offset: offset, limit: limit, model: model, source: source, result: resultFilter, apiKeyAliases: apiKeyAliases, resp: resp}); err != nil {
 		return RequestPage{}, err
 	}
 	result := <-resp
@@ -312,35 +295,6 @@ func (s *Store) QueryAPIKeyAliases() ([]APIKeyAlias, error) {
 	}
 	result := <-resp
 	return result.aliases, result.err
-}
-
-// SetAPIKeyAlias assigns alias to a raw downstream key without persisting the key.
-func (s *Store) SetAPIKeyAlias(rawKey, alias string) (APIKeyAlias, error) {
-	resp := make(chan apiKeyAliasResult, 1)
-	if err := s.send(setAPIKeyAliasCommand{rawKey: rawKey, alias: alias, resp: resp}); err != nil {
-		return APIKeyAlias{}, err
-	}
-	result := <-resp
-	return result.alias, result.err
-}
-
-// DeleteAPIKeyAlias removes the alias associated with a raw downstream key.
-func (s *Store) DeleteAPIKeyAlias(rawKey string) error {
-	resp := make(chan error, 1)
-	if err := s.send(deleteAPIKeyAliasCommand{rawKey: rawKey, resp: resp}); err != nil {
-		return err
-	}
-	return <-resp
-}
-
-// ResolveAPIKeyAlias returns one configured alias, matched case-insensitively.
-func (s *Store) ResolveAPIKeyAlias(alias string) (APIKeyAlias, error) {
-	resp := make(chan apiKeyAliasResult, 1)
-	if err := s.send(resolveAPIKeyAliasCommand{alias: alias, resp: resp}); err != nil {
-		return APIKeyAlias{}, err
-	}
-	result := <-resp
-	return result.alias, result.err
 }
 
 func (s *Store) QueryDashboardPreferences() (DashboardPreferences, error) {
@@ -538,12 +492,12 @@ func (s *Store) run(actor *storeActor) {
 					item.resp <- queryResult{err: withStatus(400, "%v", err)}
 					continue
 				}
-				apiKeyID, err := actor.resolveAPIKeyAliasID(item.apiKeyAlias)
+				apiKeyIDs, err := actor.resolveAPIKeyAliasIDs(item.apiKeyAliases)
 				if err != nil {
 					item.resp <- queryResult{err: err}
 					continue
 				}
-				stats := buildStatsForRangeWithFilters(actor.data, actor.since, actor.lastUsed, item.queryRange, item.source, apiKeyID, actor.apiKeyAliases, time.Now().UTC())
+				stats := buildStatsForRangeWithFilters(actor.data, actor.since, actor.lastUsed, item.queryRange, item.source, apiKeyIDs, actor.apiKeyAliases, time.Now().UTC())
 				item.resp <- queryResult{stats: stats}
 			case requestQueryCommand:
 				now := time.Now().UTC()
@@ -552,7 +506,7 @@ func (s *Store) run(actor *storeActor) {
 					item.resp <- requestQueryResult{err: err}
 					continue
 				}
-				page, err := actor.queryRequests(item.queryRange, item.offset, item.limit, item.model, item.source, item.result, item.apiKeyAlias, now)
+				page, err := actor.queryRequests(item.queryRange, item.offset, item.limit, item.model, item.source, item.result, item.apiKeyAliases, now)
 				item.resp <- requestQueryResult{page: page, err: err}
 			case preferencesQueryCommand:
 				item.resp <- preferencesResult{preferences: cloneDashboardPreferences(actor.dashboardPreferences)}
@@ -561,14 +515,6 @@ func (s *Store) run(actor *storeActor) {
 				item.resp <- preferencesResult{preferences: preferences, err: err}
 			case apiKeyAliasesCommand:
 				item.resp <- apiKeyAliasesResult{aliases: actor.apiKeyAliasViews()}
-			case setAPIKeyAliasCommand:
-				alias, err := actor.setAPIKeyAlias(item.rawKey, item.alias)
-				item.resp <- apiKeyAliasResult{alias: alias, err: err}
-			case deleteAPIKeyAliasCommand:
-				item.resp <- actor.deleteAPIKeyAlias(item.rawKey)
-			case resolveAPIKeyAliasCommand:
-				alias, err := actor.resolveAPIKeyAlias(item.alias)
-				item.resp <- apiKeyAliasResult{alias: alias, err: err}
 			case priceQueryCommand:
 				item.resp <- priceQueryResult{response: actor.priceBookResponse()}
 			case savePricesCommand:
@@ -591,7 +537,7 @@ func (s *Store) run(actor *storeActor) {
 					item.resp <- costSnapshotResult{err: err}
 					continue
 				}
-				apiKeyID, err := actor.resolveAPIKeyAliasID(item.apiKeyAlias)
+				apiKeyIDs, err := actor.resolveAPIKeyAliasIDs(item.apiKeyAliases)
 				if err == nil {
 					err = item.queryRange.validate()
 				}
@@ -606,7 +552,7 @@ func (s *Store) run(actor *storeActor) {
 					HighWater:     actor.nextRequestSeq,
 					Generation:    actor.costGeneration,
 					Source:        item.source,
-					APIKeyID:      apiKeyID,
+					APIKeyIDs:     apiKeyIDs,
 				}, err: err}
 			case resetCommand:
 				if err := actor.retryFailedFlush(time.Now().UTC()); err != nil {
@@ -701,6 +647,9 @@ func (a *storeActor) initialize() error {
 		if err := migrateUsageSources(hours, requests, version); err != nil {
 			return err
 		}
+		// API key aliases are now declared solely via plugin config and held
+		// in-memory. Remove any legacy persisted alias metadata from bbolt.
+		_ = meta.Delete(apiKeyAliasesKey)
 		return meta.Put(schemaKey, encodeUint64(persistenceSchemaVersion))
 	}); err != nil {
 		return fmt.Errorf("initialize database: %w", err)
@@ -726,7 +675,11 @@ func (a *storeActor) reload() error {
 	a.priceSyncSettings = defaultPriceSyncSettings()
 	a.lastPriceSync = nil
 	a.dashboardPreferences = defaultDashboardPreferences()
-	a.apiKeyAliases = make(map[string]APIKeyAliasRecord)
+	configuredAliases, err := buildAPIKeyAliasRecords(a.config.APIKeyAliases)
+	if err != nil {
+		return err
+	}
+	a.apiKeyAliases = configuredAliases
 
 	return a.db.View(func(tx *bolt.Tx) error {
 		meta := tx.Bucket(metaBucket)
@@ -758,16 +711,6 @@ func (a *storeActor) reload() error {
 				return fmt.Errorf("validate dashboard preferences: %w", err)
 			}
 			a.dashboardPreferences = normalized
-		}
-		if raw := meta.Get(apiKeyAliasesKey); len(raw) > 0 {
-			var stored map[string]APIKeyAliasRecord
-			if err := json.Unmarshal(raw, &stored); err != nil {
-				return fmt.Errorf("decode API key aliases: %w", err)
-			}
-			if err := validateAPIKeyAliasRecords(stored); err != nil {
-				return fmt.Errorf("validate API key aliases: %w", err)
-			}
-			a.apiKeyAliases = cloneAPIKeyAliases(stored)
 		}
 		a.priceRevision = decodeUint64(meta.Get(modelPriceRevisionKey))
 		if a.priceRevision == 0 && len(a.modelPrices) > 0 {
@@ -928,15 +871,6 @@ func validateRestoreDatabase(path string) error {
 				return fmt.Errorf("validate dashboard preferences: %w", err)
 			}
 		}
-		if raw := meta.Get(apiKeyAliasesKey); len(raw) > 0 {
-			var stored map[string]APIKeyAliasRecord
-			if err := json.Unmarshal(raw, &stored); err != nil {
-				return fmt.Errorf("decode API key aliases: %w", err)
-			}
-			if err := validateAPIKeyAliasRecords(stored); err != nil {
-				return fmt.Errorf("validate API key aliases: %w", err)
-			}
-		}
 		return requests.ForEach(func(key, value []byte) error {
 			if len(key) != 16 {
 				return fmt.Errorf("invalid request key length %d", len(key))
@@ -989,6 +923,9 @@ func migrateRestoreDatabase(path string) error {
 			if err := meta.Put(sinceKey, encodeInt64(time.Now().UTC().UnixNano())); err != nil {
 				return err
 			}
+		}
+		if err := meta.Delete(apiKeyAliasesKey); err != nil {
+			return err
 		}
 		return meta.Put(schemaKey, encodeUint64(persistenceSchemaVersion))
 	})
@@ -1429,11 +1366,20 @@ func (a *storeActor) reconfigure(config Config) error {
 	}
 	previous := a.config
 	previousPrune := a.lastPruneAt
+	previousAliases := a.apiKeyAliases
 	a.config = config
 	a.lastPruneAt = time.Time{}
+	configuredAliases, aliasErr := buildAPIKeyAliasRecords(config.APIKeyAliases)
+	if aliasErr != nil {
+		a.config = previous
+		a.lastPruneAt = previousPrune
+		return aliasErr
+	}
+	a.apiKeyAliases = configuredAliases
 	if err := a.flush(time.Now().UTC(), true); err != nil {
 		a.config = previous
 		a.lastPruneAt = previousPrune
+		a.apiKeyAliases = previousAliases
 		a.lastFlushErr = err
 		return err
 	}
@@ -1648,7 +1594,7 @@ func (a *storeActor) reset() error {
 	return nil
 }
 
-func (a *storeActor) queryRequests(queryRange usageRange, offset, limit int, model, source, resultFilter, apiKeyAlias string, now time.Time) (RequestPage, error) {
+func (a *storeActor) queryRequests(queryRange usageRange, offset, limit int, model, source, resultFilter string, apiKeyAliases []string, now time.Time) (RequestPage, error) {
 	if err := queryRange.validate(); err != nil {
 		return RequestPage{}, withStatus(400, "%v", err)
 	}
@@ -1664,7 +1610,7 @@ func (a *storeActor) queryRequests(queryRange usageRange, offset, limit int, mod
 	if resultFilter != "" && resultFilter != "success" && resultFilter != "failed" {
 		return RequestPage{}, withStatus(400, "result must be success or failed")
 	}
-	apiKeyID, err := a.resolveAPIKeyAliasID(apiKeyAlias)
+	apiKeyIDs, err := a.resolveAPIKeyAliasIDs(apiKeyAliases)
 	if err != nil {
 		return RequestPage{}, err
 	}
@@ -1710,8 +1656,10 @@ func (a *storeActor) queryRequests(queryRange usageRange, offset, limit int, mod
 			if source != "" && item.Source != source {
 				continue
 			}
-			if apiKeyID != "" && item.APIKeyID != apiKeyID {
-				continue
+			if len(apiKeyIDs) > 0 {
+				if _, ok := apiKeyIDs[item.APIKeyID]; !ok {
+					continue
+				}
 			}
 			if (resultFilter == "success" && item.Failed) || (resultFilter == "failed" && !item.Failed) {
 				continue
@@ -1744,85 +1692,8 @@ func (a *storeActor) apiKeyAliasViews() []APIKeyAlias {
 	return views
 }
 
-func (a *storeActor) resolveAPIKeyAlias(alias string) (APIKeyAlias, error) {
-	record, ok := findAPIKeyAlias(a.apiKeyAliases, alias)
-	if !ok {
-		return APIKeyAlias{}, withStatus(404, "API key alias %q was not found", normalizeAPIKeyAlias(alias))
-	}
-	return record.public(), nil
-}
-
-func (a *storeActor) resolveAPIKeyAliasID(alias string) (string, error) {
-	if normalizeAPIKeyAlias(alias) == "" {
-		return "", nil
-	}
-	record, ok := findAPIKeyAlias(a.apiKeyAliases, alias)
-	if !ok {
-		return "", withStatus(400, "API key alias %q was not found", normalizeAPIKeyAlias(alias))
-	}
-	return record.APIKeyID, nil
-}
-
-func (a *storeActor) setAPIKeyAlias(rawKey, alias string) (APIKeyAlias, error) {
-	id, suffix := apiKeyIdentity(rawKey)
-	alias = normalizeAPIKeyAlias(alias)
-	if id == "" {
-		return APIKeyAlias{}, withStatus(400, "API key is required")
-	}
-	if alias == "" {
-		return APIKeyAlias{}, withStatus(400, "API key alias is required")
-	}
-	if existing, ok := findAPIKeyAlias(a.apiKeyAliases, alias); ok && existing.APIKeyID != id {
-		return APIKeyAlias{}, withStatus(400, "API key alias %q is already in use", alias)
-	}
-	record := APIKeyAliasRecord{APIKeyID: id, APIKeySuffix: suffix, Alias: alias, UpdatedAt: time.Now().UTC()}
-	next := cloneAPIKeyAliases(a.apiKeyAliases)
-	next[id] = record
-	if err := a.persistAPIKeyAliases(next); err != nil {
-		return APIKeyAlias{}, err
-	}
-	a.apiKeyAliases = next
-	return record.public(), nil
-}
-
-func (a *storeActor) deleteAPIKeyAlias(rawKey string) error {
-	id, _ := apiKeyIdentity(rawKey)
-	if id == "" {
-		return withStatus(400, "API key is required")
-	}
-	if _, exists := a.apiKeyAliases[id]; !exists {
-		return nil
-	}
-	next := cloneAPIKeyAliases(a.apiKeyAliases)
-	delete(next, id)
-	if err := a.persistAPIKeyAliases(next); err != nil {
-		return err
-	}
-	a.apiKeyAliases = next
-	return nil
-}
-
-func (a *storeActor) persistAPIKeyAliases(aliases map[string]APIKeyAliasRecord) error {
-	if err := validateAPIKeyAliasRecords(aliases); err != nil {
-		return withStatus(400, "%v", err)
-	}
-	encoded, err := json.Marshal(aliases)
-	if err != nil {
-		return fmt.Errorf("encode API key aliases: %w", err)
-	}
-	if err := a.db.Update(func(tx *bolt.Tx) error {
-		meta := tx.Bucket(metaBucket)
-		if meta == nil {
-			return errors.New("metadata bucket is missing")
-		}
-		if len(aliases) == 0 {
-			return meta.Delete(apiKeyAliasesKey)
-		}
-		return meta.Put(apiKeyAliasesKey, encoded)
-	}); err != nil {
-		return fmt.Errorf("persist API key aliases: %w", err)
-	}
-	return nil
+func (a *storeActor) resolveAPIKeyAliasIDs(aliases []string) (map[string]struct{}, error) {
+	return resolveAPIKeyAliasIDs(aliases, a.apiKeyAliases)
 }
 
 func retentionCutoff(config Config, now time.Time) int64 {

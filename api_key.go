@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 )
@@ -64,6 +65,38 @@ type APIKeyAlias struct {
 	UpdatedAt    time.Time `json:"updated_at"`
 }
 
+// ConfigAPIKeyAlias is a single plugin-config entry mapping a raw downstream API
+// key to a human-readable alias. The raw key is fingerprinted at store-apply time
+// and never persisted to bbolt.
+type ConfigAPIKeyAlias struct {
+	APIKey string
+	Alias  string
+}
+
+// buildAPIKeyAliasRecords converts config-declared entries into in-memory
+// fingerprint-keyed alias records. Returns an error on duplicate fingerprints
+// (should not happen after config validation, but guards against collisions).
+func buildAPIKeyAliasRecords(entries []ConfigAPIKeyAlias) (map[string]APIKeyAliasRecord, error) {
+	records := make(map[string]APIKeyAliasRecord, len(entries))
+	now := nowUTC()
+	for _, entry := range entries {
+		id, suffix := apiKeyIdentity(entry.APIKey)
+		if id == "" {
+			return nil, fmt.Errorf("api_key_aliases: api_key must not be empty")
+		}
+		if _, exists := records[id]; exists {
+			return nil, fmt.Errorf("api_key_aliases: duplicate api_key fingerprint")
+		}
+		records[id] = APIKeyAliasRecord{
+			APIKeyID:     id,
+			APIKeySuffix: suffix,
+			Alias:        normalizeAPIKeyAlias(entry.Alias),
+			UpdatedAt:    now,
+		}
+	}
+	return records, nil
+}
+
 func apiKeyIdentity(raw string) (id, suffix string) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -91,15 +124,6 @@ func (r APIKeyAliasRecord) public() APIKeyAlias {
 	return APIKeyAlias{APIKeySuffix: r.APIKeySuffix, Alias: r.Alias, UpdatedAt: r.UpdatedAt.UTC()}
 }
 
-func cloneAPIKeyAliases(input map[string]APIKeyAliasRecord) map[string]APIKeyAliasRecord {
-	result := make(map[string]APIKeyAliasRecord, len(input))
-	for id, record := range input {
-		record.APIKeyID = id
-		result[id] = record
-	}
-	return result
-}
-
 func findAPIKeyAlias(records map[string]APIKeyAliasRecord, alias string) (APIKeyAliasRecord, bool) {
 	alias = normalizeAPIKeyAlias(alias)
 	if alias == "" {
@@ -114,21 +138,6 @@ func findAPIKeyAlias(records map[string]APIKeyAliasRecord, alias string) (APIKey
 	return APIKeyAliasRecord{}, false
 }
 
-func validateAPIKeyAliasRecords(records map[string]APIKeyAliasRecord) error {
-	seen := make(map[string]string, len(records))
-	for id, record := range records {
-		if strings.TrimSpace(id) == "" || normalizeAPIKeyAlias(record.Alias) == "" {
-			return fmt.Errorf("invalid API key alias record")
-		}
-		key := strings.ToLower(normalizeAPIKeyAlias(record.Alias))
-		if other, exists := seen[key]; exists && other != id {
-			return fmt.Errorf("API key alias %q is already in use", record.Alias)
-		}
-		seen[key] = id
-	}
-	return nil
-}
-
 func applyAPIKeyAlias(dimensions *Dimensions, aliases map[string]APIKeyAliasRecord) string {
 	if dimensions.APIKeyID == "" {
 		return ""
@@ -138,4 +147,44 @@ func applyAPIKeyAlias(dimensions *Dimensions, aliases map[string]APIKeyAliasReco
 		return ""
 	}
 	return record.Alias
+}
+
+// resolveAPIKeyAliasIDs resolves one or more alias names (case-insensitive) into
+// the set of API key fingerprints they map to. Empty input (or empty entries)
+// returns nil when no other alias is present. Any non-empty alias that does not
+// match a configured record returns an error.
+func resolveAPIKeyAliasIDs(aliases []string, records map[string]APIKeyAliasRecord) (map[string]struct{}, error) {
+	if len(aliases) == 0 {
+		return nil, nil
+	}
+	ids := make(map[string]struct{}, len(aliases))
+	for _, alias := range aliases {
+		alias = normalizeAPIKeyAlias(alias)
+		if alias == "" {
+			continue
+		}
+		record, ok := findAPIKeyAlias(records, alias)
+		if !ok {
+			return nil, withStatus(400, "API key alias %q was not found", normalizeAPIKeyAlias(alias))
+		}
+		ids[record.APIKeyID] = struct{}{}
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	return ids, nil
+}
+
+// apiKeyIDSetKey produces a stable, sorted string representation of an API key ID
+// set for use as a cache key component.
+func apiKeyIDSetKey(ids map[string]struct{}) string {
+	if len(ids) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(ids))
+	for k := range ids {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return strings.Join(keys, ",")
 }

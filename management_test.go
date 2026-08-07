@@ -34,7 +34,7 @@ func TestManagementRegistrationUsesDynamicPluginID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(registration.Routes) != 11 || registration.Routes[0].Path != "/plugins/custom-id/stats" || registration.Routes[1].Path != "/plugins/custom-id/requests" || registration.Routes[2].Path != "/plugins/custom-id/costs" || registration.Routes[4].Method != http.MethodGet || registration.Routes[4].Path != "/plugins/custom-id/api-key-aliases" || registration.Routes[5].Method != http.MethodPut || registration.Routes[5].Path != "/plugins/custom-id/api-key-aliases" || registration.Routes[6].Method != http.MethodDelete || registration.Routes[6].Path != "/plugins/custom-id/api-key-aliases" || registration.Routes[7].Method != http.MethodPut || registration.Routes[7].Path != "/plugins/custom-id/prices" || registration.Routes[8].Path != "/plugins/custom-id/prices/sync" || registration.Routes[9].Method != http.MethodGet || registration.Routes[9].Path != "/plugins/custom-id/backup" || registration.Routes[10].Method != http.MethodPost || registration.Routes[10].Path != "/plugins/custom-id/restore" || len(registration.Resources) != 8 || registration.Resources[0].Path != "/dashboard" || registration.Resources[1].Path != "/stats" || registration.Resources[2].Path != "/requests" || registration.Resources[3].Path != "/costs" || registration.Resources[4].Path != "/exchange-rate" || registration.Resources[5].Path != "/prices" || registration.Resources[6].Path != "/preferences" || registration.Resources[7].Path != "/api-key-aliases" {
+	if len(registration.Routes) != 9 || registration.Routes[0].Path != "/plugins/custom-id/stats" || registration.Routes[1].Path != "/plugins/custom-id/requests" || registration.Routes[2].Path != "/plugins/custom-id/costs" || registration.Routes[4].Method != http.MethodGet || registration.Routes[4].Path != "/plugins/custom-id/api-key-aliases" || registration.Routes[5].Method != http.MethodPut || registration.Routes[5].Path != "/plugins/custom-id/prices" || registration.Routes[6].Path != "/plugins/custom-id/prices/sync" || registration.Routes[7].Method != http.MethodGet || registration.Routes[7].Path != "/plugins/custom-id/backup" || registration.Routes[8].Method != http.MethodPost || registration.Routes[8].Path != "/plugins/custom-id/restore" || len(registration.Resources) != 8 || registration.Resources[0].Path != "/dashboard" || registration.Resources[1].Path != "/stats" || registration.Resources[2].Path != "/requests" || registration.Resources[3].Path != "/costs" || registration.Resources[4].Path != "/exchange-rate" || registration.Resources[5].Path != "/prices" || registration.Resources[6].Path != "/preferences" || registration.Resources[7].Path != "/api-key-aliases" {
 		t.Fatalf("unexpected registration: %+v", registration)
 	}
 	if registration.Routes[0].Menu != "" {
@@ -44,6 +44,12 @@ func TestManagementRegistrationUsesDynamicPluginID(t *testing.T) {
 
 func TestManagementAPIKeyAliasesAndFilters(t *testing.T) {
 	config := testConfig(t)
+	rawKey := "downstream-key-must-never-be-returned"
+	secondRawKey := "another-downstream-key-must-never-be-returned"
+	config.APIKeyAliases = []ConfigAPIKeyAlias{
+		{APIKey: rawKey, Alias: "Personal"},
+		{APIKey: secondRawKey, Alias: "Team"},
+	}
 	store, err := openStore(config)
 	if err != nil {
 		t.Fatal(err)
@@ -61,30 +67,23 @@ func TestManagementAPIKeyAliasesAndFilters(t *testing.T) {
 	}}
 	defer runtime.shutdown()
 
-	rawKey := "downstream-key-must-never-be-returned"
 	apiKeyID, _ := apiKeyIdentity(rawKey)
 	if err := store.Record(normalizedUsage{Dimensions: Dimensions{Model: "m", Source: "cli", APIKeyID: apiKeyID}, RequestedAt: nowUTC(), Counters: Counters{Requests: 1, TotalTokens: 3}}); err != nil {
 		t.Fatal(err)
 	}
-
-	setRequest, _ := json.Marshal(pluginapi.ManagementRequest{Method: http.MethodPut, Path: runtime.routes.apiKeyAliasesPath, Headers: http.Header{"Content-Type": []string{"application/json"}}, Body: []byte(`{"api_key":"downstream-key-must-never-be-returned","alias":"Personal"}`)})
-	response, err := runtime.handleManagement(setRequest)
-	if err != nil || response.StatusCode != http.StatusOK || !strings.Contains(string(response.Body), `"alias":"Personal"`) || !strings.Contains(string(response.Body), `"api_key_suffix":"turned"`) {
-		t.Fatalf("save API key alias response: %+v, %v", response, err)
-	}
-	for _, secret := range []string{rawKey, apiKeyID} {
-		if strings.Contains(string(response.Body), secret) {
-			t.Fatalf("save response exposed secret %q: %s", secret, response.Body)
-		}
+	secondAPIKeyID, _ := apiKeyIdentity(secondRawKey)
+	if err := store.Record(normalizedUsage{Dimensions: Dimensions{Model: "m", Source: "cli", APIKeyID: secondAPIKeyID}, RequestedAt: nowUTC(), Counters: Counters{Requests: 1, TotalTokens: 5}}); err != nil {
+		t.Fatal(err)
 	}
 
+	var response pluginapi.ManagementResponse
 	for _, path := range []string{runtime.routes.apiKeyAliasesPath, runtime.routes.resourceAPIKeyAliasesPath} {
 		request, _ := json.Marshal(pluginapi.ManagementRequest{Method: http.MethodGet, Path: path})
 		response, err = runtime.handleManagement(request)
-		if err != nil || response.StatusCode != http.StatusOK || !strings.Contains(string(response.Body), `"aliases":[`) || !strings.Contains(string(response.Body), `"alias":"Personal"`) {
+		if err != nil || response.StatusCode != http.StatusOK || !strings.Contains(string(response.Body), `"aliases":[`) || !strings.Contains(string(response.Body), `"alias":"Personal"`) || !strings.Contains(string(response.Body), `"alias":"Team"`) {
 			t.Fatalf("list API key aliases response: %+v, %v", response, err)
 		}
-		for _, secret := range []string{rawKey, apiKeyID} {
+		for _, secret := range []string{rawKey, secondRawKey, apiKeyID, secondAPIKeyID} {
 			if strings.Contains(string(response.Body), secret) {
 				t.Fatalf("list response exposed secret %q: %s", secret, response.Body)
 			}
@@ -92,31 +91,37 @@ func TestManagementAPIKeyAliasesAndFilters(t *testing.T) {
 	}
 
 	managementPaths := map[string]string{
-		runtime.routes.statsPath:    `"total_tokens":3`,
-		runtime.routes.requestsPath: `"total":1`,
-		runtime.routes.costsPath:    `"requests":1`,
+		runtime.routes.statsPath:    `"total_tokens":8`,
+		runtime.routes.requestsPath: `"total":2`,
+		runtime.routes.costsPath:    `"requests":2`,
 	}
 	for path, expected := range managementPaths {
-		query := url.Values{"range": []string{"24h"}, "api_key_alias": []string{"personal"}}
+		query := url.Values{"range": []string{"24h"}, "api_key_alias": []string{"personal", "team"}}
 		request, _ := json.Marshal(pluginapi.ManagementRequest{Method: http.MethodGet, Path: path, Query: query})
 		response, err = runtime.handleManagement(request)
 		if err != nil || response.StatusCode != http.StatusOK || !strings.Contains(string(response.Body), expected) {
 			t.Fatalf("management API key alias filter response: %+v, %v", response, err)
 		}
 	}
+	emptyAliasRequest, _ := json.Marshal(pluginapi.ManagementRequest{Method: http.MethodGet, Path: runtime.routes.statsPath, Query: url.Values{"range": []string{"24h"}, "api_key_alias": []string{""}}})
+	response, err = runtime.handleManagement(emptyAliasRequest)
+	if err != nil || response.StatusCode != http.StatusOK || !strings.Contains(string(response.Body), `"total_tokens":8`) {
+		t.Fatalf("empty API key alias must preserve the unfiltered response: %+v, %v", response, err)
+	}
+	for _, method := range []string{http.MethodPut, http.MethodDelete} {
+		request, _ := json.Marshal(pluginapi.ManagementRequest{Method: method, Path: runtime.routes.apiKeyAliasesPath})
+		response, err = runtime.handleManagement(request)
+		if err != nil || response.StatusCode != http.StatusMethodNotAllowed || response.Headers.Get("Allow") != http.MethodGet {
+			t.Fatalf("API key alias %s must be read-only: %+v, %v", method, response, err)
+		}
+	}
 
 	for _, path := range []string{runtime.routes.resourceStatsPath, runtime.routes.resourceRequestsPath, runtime.routes.resourceCostsPath} {
-		request, _ := json.Marshal(pluginapi.ManagementRequest{Method: http.MethodGet, Path: path, Query: url.Values{"range": []string{"24h"}, "api_key_alias": []string{"Personal"}}})
+		request, _ := json.Marshal(pluginapi.ManagementRequest{Method: http.MethodGet, Path: path, Query: url.Values{"range": []string{"24h"}, "api_key_alias": []string{"Personal", "Team"}}})
 		response, err = runtime.handleManagement(request)
 		if err != nil || response.StatusCode != http.StatusForbidden {
 			t.Fatalf("resource API key alias filter status: %+v, %v", response, err)
 		}
-	}
-
-	deleteRequest, _ := json.Marshal(pluginapi.ManagementRequest{Method: http.MethodDelete, Path: runtime.routes.apiKeyAliasesPath, Headers: http.Header{"Content-Type": []string{"application/json"}}, Body: []byte(`{"api_key":"downstream-key-must-never-be-returned"}`)})
-	response, err = runtime.handleManagement(deleteRequest)
-	if err != nil || response.StatusCode != http.StatusOK || strings.Contains(string(response.Body), rawKey) || strings.Contains(string(response.Body), apiKeyID) {
-		t.Fatalf("delete API key alias response: %+v, %v", response, err)
 	}
 }
 

@@ -106,16 +106,6 @@ func (r *pluginRuntime) registerManagement(raw []byte) (managementRegistrationRe
 			},
 			{
 				Method:      http.MethodPut,
-				Path:        "/plugins/" + pluginID + "/api-key-aliases",
-				Description: "Assign a display alias to a downstream API key without persisting the key.",
-			},
-			{
-				Method:      http.MethodDelete,
-				Path:        "/plugins/" + pluginID + "/api-key-aliases",
-				Description: "Remove a downstream API key alias without exposing the key.",
-			},
-			{
-				Method:      http.MethodPut,
 				Path:        "/plugins/" + pluginID + "/prices",
 				Description: "Persist per-model input, output, cache, and context-tier token prices.",
 			},
@@ -217,16 +207,10 @@ func (r *pluginRuntime) handleManagement(raw []byte) (pluginapi.ManagementRespon
 		}
 		return r.costsResponse(request)
 	case routes.apiKeyAliasesPath:
-		switch {
-		case strings.EqualFold(request.Method, http.MethodGet):
-			return r.apiKeyAliasesResponse()
-		case strings.EqualFold(request.Method, http.MethodPut):
-			return r.saveAPIKeyAliasResponse(request)
-		case strings.EqualFold(request.Method, http.MethodDelete):
-			return r.deleteAPIKeyAliasResponse(request)
-		default:
-			return methodNotAllowed(http.MethodGet + ", " + http.MethodPut + ", " + http.MethodDelete), nil
+		if !strings.EqualFold(request.Method, http.MethodGet) {
+			return methodNotAllowed(http.MethodGet), nil
 		}
+		return r.apiKeyAliasesResponse()
 	case routes.resourceAPIKeyAliasesPath:
 		if !strings.EqualFold(request.Method, http.MethodGet) {
 			return methodNotAllowed(http.MethodGet), nil
@@ -287,7 +271,7 @@ func (r *pluginRuntime) statsResponse(request pluginapi.ManagementRequest) (plug
 	if err != nil {
 		return jsonResponse(errorHTTPStatus(err), map[string]any{"error": err.Error()}), nil
 	}
-	stats, err := r.store.queryStatsBySourceAndAPIKeyAlias(queryRange, request.Query.Get("source"), request.Query.Get("api_key_alias"))
+	stats, err := r.store.queryStatsBySourceAndAPIKeyAlias(queryRange, request.Query.Get("source"), request.Query["api_key_alias"])
 	if err != nil {
 		status := errorHTTPStatus(err)
 		return jsonResponse(status, map[string]any{"error": err.Error()}), nil
@@ -313,7 +297,7 @@ func (r *pluginRuntime) requestsResponse(request pluginapi.ManagementRequest) (p
 	if r.store == nil {
 		return jsonResponse(http.StatusServiceUnavailable, map[string]any{"error": "storage is not initialized"}), nil
 	}
-	page, err := r.store.queryRequestPageByFilters(queryRange, offset, limit, request.Query.Get("model"), request.Query.Get("source"), request.Query.Get("result"), request.Query.Get("api_key_alias"))
+	page, err := r.store.queryRequestPageByFilters(queryRange, offset, limit, request.Query.Get("model"), request.Query.Get("source"), request.Query.Get("result"), request.Query["api_key_alias"])
 	if err != nil {
 		return jsonResponse(errorHTTPStatus(err), map[string]any{"error": err.Error()}), nil
 	}
@@ -331,7 +315,7 @@ func (r *pluginRuntime) costsResponse(request pluginapi.ManagementRequest) (plug
 	if store == nil {
 		return jsonResponse(http.StatusServiceUnavailable, map[string]any{"error": "storage is not initialized"}), nil
 	}
-	costs, err := store.queryCostsBySourceAndAPIKeyAlias(queryRange, request.Query.Get("source"), request.Query.Get("api_key_alias"))
+	costs, err := store.queryCostsBySourceAndAPIKeyAlias(queryRange, request.Query.Get("source"), request.Query["api_key_alias"])
 	if err != nil {
 		return jsonResponse(errorHTTPStatus(err), map[string]any{"error": err.Error()}), nil
 	}
@@ -367,11 +351,6 @@ func (r *pluginRuntime) pricesResponse() (pluginapi.ManagementResponse, error) {
 	return jsonResponse(http.StatusOK, priceBook), nil
 }
 
-type apiKeyAliasInput struct {
-	APIKey string `json:"api_key"`
-	Alias  string `json:"alias"`
-}
-
 func hasAPIKeyAliasQuery(request pluginapi.ManagementRequest) bool {
 	_, exists := request.Query["api_key_alias"]
 	return exists
@@ -393,63 +372,6 @@ func (r *pluginRuntime) apiKeyAliasesResponse() (pluginapi.ManagementResponse, e
 		return jsonResponse(errorHTTPStatus(err), map[string]any{"error": err.Error()}), nil
 	}
 	return jsonResponse(http.StatusOK, map[string]any{"aliases": aliases}), nil
-}
-
-func (r *pluginRuntime) saveAPIKeyAliasResponse(request pluginapi.ManagementRequest) (pluginapi.ManagementResponse, error) {
-	input, response := decodeAPIKeyAliasInput(request, true)
-	if response != nil {
-		return *response, nil
-	}
-	r.mu.RLock()
-	store := r.store
-	r.mu.RUnlock()
-	if store == nil {
-		return jsonResponse(http.StatusServiceUnavailable, map[string]any{"error": "storage is not initialized"}), nil
-	}
-	alias, err := store.SetAPIKeyAlias(input.APIKey, input.Alias)
-	if err != nil {
-		return jsonResponse(errorHTTPStatus(err), map[string]any{"error": err.Error()}), nil
-	}
-	return jsonResponse(http.StatusOK, alias), nil
-}
-
-func (r *pluginRuntime) deleteAPIKeyAliasResponse(request pluginapi.ManagementRequest) (pluginapi.ManagementResponse, error) {
-	input, response := decodeAPIKeyAliasInput(request, false)
-	if response != nil {
-		return *response, nil
-	}
-	r.mu.RLock()
-	store := r.store
-	r.mu.RUnlock()
-	if store == nil {
-		return jsonResponse(http.StatusServiceUnavailable, map[string]any{"error": "storage is not initialized"}), nil
-	}
-	if err := store.DeleteAPIKeyAlias(input.APIKey); err != nil {
-		return jsonResponse(errorHTTPStatus(err), map[string]any{"error": err.Error()}), nil
-	}
-	return jsonResponse(http.StatusOK, map[string]any{"deleted": true}), nil
-}
-
-func decodeAPIKeyAliasInput(request pluginapi.ManagementRequest, requireAlias bool) (apiKeyAliasInput, *pluginapi.ManagementResponse) {
-	contentType, _, err := mime.ParseMediaType(request.Headers.Get("Content-Type"))
-	if err != nil || !strings.EqualFold(contentType, "application/json") {
-		response := jsonResponse(http.StatusUnsupportedMediaType, map[string]any{"error": "Content-Type must be application/json"})
-		return apiKeyAliasInput{}, &response
-	}
-	if len(request.Body) > 64<<10 {
-		response := jsonResponse(http.StatusRequestEntityTooLarge, map[string]any{"error": "API key alias JSON is too large"})
-		return apiKeyAliasInput{}, &response
-	}
-	var input apiKeyAliasInput
-	if err := decodeStrictJSON(request.Body, &input); err != nil || strings.TrimSpace(input.APIKey) == "" {
-		response := jsonResponse(http.StatusBadRequest, map[string]any{"error": "api_key is required"})
-		return input, &response
-	}
-	if requireAlias && strings.TrimSpace(input.Alias) == "" {
-		response := jsonResponse(http.StatusBadRequest, map[string]any{"error": "alias is required"})
-		return input, &response
-	}
-	return input, nil
 }
 
 // Plugin resource routes are dispatched by the host as GET-only. The save=1

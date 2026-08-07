@@ -998,14 +998,19 @@ func TestDashboardLocalesCatalog(t *testing.T) {
 
 func TestDashboardAPIKeyDimensionContract(t *testing.T) {
 	for _, required := range []string{
-		`id="apiKeyManagementButton"`,
-		`requestAPIKeyFilter`,
-		`managementAPIKeyAliasesURL=managementBase+'/api-key-aliases'`,
-		`api_key_alias`,
+		`requestAPIKeyAliases=[]`,
+		`select.multiple=true`,
+		`select.size=3`,
+		`requestAPIKeyFilterLabel`,
+		`apiKey.multiSelectHint`,
+		`renderAPIKeyFilter();if(currentData)`,
+		`id="apiKeyFilterDialog"`,
+		`function apiKeyAliasQuery(params)`,
+		`params.append('api_key_alias',alias)`,
+		`managementStatsURL=managementBase+'/stats'`,
+		`apiKeyAliasesURL=resourceBase+'/api-key-aliases'`,
 		`api_key_suffix`,
 		`Authorization`,
-		`apiKey.rawPrompt`,
-		`apiKey.aliasPrompt`,
 		`apiKeyLabel(record)`,
 		`record.api_key_suffix||''`,
 		`function apiKeyLabel(item)`,
@@ -1017,6 +1022,17 @@ func TestDashboardAPIKeyDimensionContract(t *testing.T) {
 	if strings.Contains(dashboardHTML, "originalExportCSV") {
 		t.Fatal("dashboard must not override CSV export with a partial column set")
 	}
+	for _, forbidden := range []string{
+		`id="apiKeyManagementButton"`,
+		`managementAPIKeyAliasesURL`,
+		`apiKey.rawPrompt`,
+		`apiKey.aliasPrompt`,
+		`body:JSON.stringify({api_key:raw,alias:alias})`,
+	} {
+		if strings.Contains(dashboardHTML, forbidden) {
+			t.Fatalf("dashboard must not expose API key alias management %q", forbidden)
+		}
+	}
 	for _, code := range []string{"en", "zh-CN", "zh-TW", "ru"} {
 		data, err := localeFS.ReadFile("locales/" + code + ".json")
 		if err != nil {
@@ -1026,7 +1042,7 @@ func TestDashboardAPIKeyDimensionContract(t *testing.T) {
 		if err := json.Unmarshal(data, &catalog); err != nil {
 			t.Fatalf("locale %s invalid JSON: %v", code, err)
 		}
-		for _, key := range []string{"button.apiKeyManagement", "requestFilter.apiKey", "requestFilter.allAPIKeys", "apiKey.unnamed", "apiKey.managementPrompt", "apiKey.rawPrompt", "apiKey.aliasPrompt", "table.apiKeyAlias", "table.apiKeySuffix"} {
+		for _, key := range []string{"requestFilter.apiKey", "requestFilter.apiKeyMulti", "requestFilter.clearAPIKeys", "apiKey.unnamed", "apiKey.filterTitle", "apiKey.filterDescription", "apiKey.filterConfirm", "apiKey.multiSelectHint", "apiKey.multiSelectAria", "table.apiKeyAlias", "table.apiKeySuffix"} {
 			if catalog[key] == "" {
 				t.Fatalf("locale %s missing API key key %q", code, key)
 			}
