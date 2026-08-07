@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "plugins": [
+    {
+      "id": "cap-token-usage-tracker",
+      "name": "CAP Token Usage Tracker",
+      "description": "Persistent token usage tracker for CLIProxyAPI. Receives usage records via the official usage_plugin API, aggregates by model, provider, and API key, estimates costs, and provides an embedded Management Center dashboard.",
+      "author": "Patrick Fu",
+      "repository": "https://github.com/patrick-fu/cap-token-usage-tracker",
+      "homepage": "https://github.com/patrick-fu/cap-token-usage-tracker",
+      "license": "MIT",
+      "install": {
+        "type": "github-release"
+      },
+      "tags": [
+        "Usage",
+        "Token",
+        "Dashboard",
+        "Management"
+      ]
+    }
+  ]
+}
