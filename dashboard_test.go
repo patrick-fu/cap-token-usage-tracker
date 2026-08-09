@@ -164,10 +164,10 @@ func TestDashboardIncludesInteractiveAnalyticsFeatures(t *testing.T) {
 		`bar-cache-read`,
 		`cache-hit-line`,
 		`stroke-dasharray:7 5`,
-		`function cacheReadTokens(point)`,
-		`function cacheHitRate(input,cacheRead)`,
-		`bucket.cacheRead+=cacheReadTokens(point)`,
-		`item.cacheHitRate=cacheHitRate(item.input,item.cacheRead)`,
+		`function trendCacheReadTokens(point)`,
+		`function trendCacheHitRate(input,cacheRead)`,
+		`bucket.cacheRead+=trendCacheReadTokens(point)`,
+		`item.cacheHitRate=trendCacheHitRate(item.input,item.cacheRead)`,
 		`pointStackTotal(point)`,
 		`t('trend.cacheHitRate')`,
 		`model_series`,
@@ -327,21 +327,53 @@ func TestDashboardIncludesInteractiveAnalyticsFeatures(t *testing.T) {
 	}
 }
 
-func TestDashboardCacheHitRateUsesInputTokenDenominator(t *testing.T) {
+func TestDashboardRequestCacheHitRateUsesProviderAwareDenominator(t *testing.T) {
 	html := dashboardHTML
-	if !strings.Contains(html, `return input?Math.min(100,cacheRead/input*100):0;`) {
-		t.Fatal("cache hit rate must divide cache read tokens by input tokens")
-	}
-	if strings.Contains(html, `var context=input+cacheRead;return context?Math.min(100,cacheRead/context*100):0;`) {
-		t.Fatal("cache hit rate still double-counts cache read tokens in its denominator")
-	}
 	for _, required := range []string{
-		`function cacheReadTokens(point){var cacheRead=Number(point.cache_read_tokens||0);return cacheRead>0?cacheRead:Number(point.cached_tokens||0);}`,
-		`bucket.cacheRead+=cacheReadTokens(point)`,
-		`item.cacheHitRate=cacheHitRate(item.input,item.cacheRead)`,
+		`function cacheCounter(point,key)`,
+		`typeof point[key]!=='number'`,
+		`function cacheReadTokens(point)`,
+		`cache_read_tokens`,
+		`cache_creation_tokens`,
+		`cached_tokens`,
+		`cacheRead===0&&creation>0&&cached===creation`,
+		`return 0`,
+		`cached>0?cached:0`,
+		`provider==='openai'||provider==='codex'||provider==='gemini'||provider==='gemini-interactions'`,
+		`function cacheHitRate(read,denominator)`,
+		`provider==='claude'||provider==='anthropic'`,
+		`provider==='openai'||provider==='codex'||provider==='gemini'||provider==='gemini-interactions'`,
+		`denominator=input+creation+read`,
+		`Number.isFinite(denominator)&&denominator>0`,
+		`rate>=0&&rate<=100`,
+		`function cacheHitRateForPoint(point)`,
+		`return cacheHitRate(cacheReadTokens(point),cacheHitDenominator(point))`,
+		`function trendCacheHitRate(input,cacheRead)`,
+		`item.cacheHitRate=trendCacheHitRate(item.input,item.cacheRead)`,
 	} {
 		if !strings.Contains(html, required) {
-			t.Fatalf("dashboardHTML missing cache hit rate aggregation %q", required)
+			t.Fatalf("dashboardHTML missing request cache hit rate contract %q", required)
+		}
+	}
+}
+
+func TestDashboardCacheHitRateContract(t *testing.T) {
+	html := dashboardHTML
+	for _, required := range []string{
+		`{key:'cache_hit',label:'table.cacheHit'}`,
+		`cache_hit_rate`,
+		`function cacheReadTokens(point)`,
+		`cache_read_tokens`,
+		`cached_tokens`,
+		`cache_creation_tokens`,
+		`claude`, `anthropic`, `openai`, `codex`, `gemini`, `gemini-interactions`,
+		`Number.isFinite`,
+		`return null`,
+		`t('value.unavailable')`,
+		`localeNumber(rate,{minimumFractionDigits:2,maximumFractionDigits:2})+'%'`,
+	} {
+		if !strings.Contains(html, required) {
+			t.Fatalf("dashboard missing cache hit rate contract %q", required)
 		}
 	}
 }

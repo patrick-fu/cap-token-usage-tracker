@@ -28,7 +28,7 @@ type DashboardPreferences struct {
 var requestColumnKeys = []string{
 	"time", "model", "api_key_alias", "api_key_suffix", "source", "service_tier", "result", "ttft_ns", "generation_ns", "tps",
 	"reasoning_effort", "input_tokens", "output_tokens", "reasoning_tokens", "cache_read_tokens",
-	"cache_creation_tokens", "total_tokens", "cache_hit", "estimated_cost", "price_source",
+	"cache_creation_tokens", "total_tokens", "cache_hit", "cache_hit_rate", "estimated_cost", "price_source",
 }
 
 var dimensionColumnKeys = []string{
